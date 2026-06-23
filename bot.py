@@ -458,21 +458,21 @@ async def cmd_profile(message: types.Message):
     )
 
 
-# ── Fallback debug — catches any message not matched above ───────────────────
+# ── Error handler ─────────────────────────────────────────────────────────────
 
-@dp.message()
-async def fallback(message: types.Message):
-    """Catch-all: shows what state the user is in so we can debug mismatches."""
-    state = dp.current_state(chat=message.chat.id, user=message.from_user.id)
-    current = await state.get_state()
-    await message.answer(
-        f"⚠️ Unexpected message: `{message.text[:50]}`\n"
-        f"Current FSM state: `{current}`\n\n"
-        "_Send /start to restart._",
-        parse_mode='Markdown',
-    )
+@dp.errors()
+async def handle_errors(event: types.ErrorEvent):
+    import traceback
+    tb = ''.join(traceback.format_exception_only(type(event.exception), event.exception))
+    try:
+        await event.update.message.answer(f"⚠️ Bot error:\n`{tb[:200]}`", parse_mode='Markdown')
+    except Exception:
+        print(f"⚠️ Handler error: {tb[:200]}")
+    print(f"⚠️ Bot error: {tb[:200]}")
+    traceback.print_exc()
 
-async def on_startup(_: Dispatcher):
+async def on_startup(dispatcher: Dispatcher):
+    print("🚀 on_startup called, WEBHOOK_URL =", WEBHOOK_URL)
     if WEBHOOK_URL:
         await bot.set_webhook(WEBHOOK_URL)
         print(f"Webhook set to {WEBHOOK_URL}")
