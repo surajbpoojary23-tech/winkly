@@ -9,10 +9,13 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 from aiohttp import web
 
-BOT_TOKEN = os.getenv('BOT_TOKEN') or "8624196108:AAGeeViOr46SLjrzkQSGSStOSO6iuKvZIjw"
+BOT_TOKEN = os.getenv('BOT_TOKEN') or "8624196108:***"
 SUPABASE_URL = os.getenv('SUPABASE_URL')  # to be filled later
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 REDIS_URL = os.getenv('REDIS_URL')
+
+# Default to Render service URL; override with WEBHOOK_URL env var if needed
+WEBHOOK_URL = os.getenv('WEBHOOK_URL') or 'https://winkly-kmsz.onrender.com'
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -21,7 +24,7 @@ dp = Dispatcher()
 @dp.message(Command('start'))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "👋 Hey! I’m *Winkly*, your quick‑match dating bot.\n"
+        "👋 Hey! I'm *Winkly*, your quick‑match dating bot.\n"
         "Use /profile to set up your preferences, then /match to find someone nearby.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Profile', callback_data='profile')], [InlineKeyboardButton(text='Find Match', callback_data='find_match')]])
@@ -39,12 +42,10 @@ async def cb_handler(cb: types.CallbackQuery):
     await cb.answer()
 
 async def on_startup(_: Dispatcher):
-    # Set up webhook server if WEBHOOK_URL is provided; otherwise fall back to long‑polling.
-    webhook_url = os.getenv('WEBHOOK_URL')
-    if webhook_url:
+    if WEBHOOK_URL:
         # Register the webhook with Telegram
-        await bot.set_webhook(webhook_url)
-        print(f"Webhook set to {webhook_url}")
+        await bot.set_webhook(WEBHOOK_URL)
+        print(f"Webhook set to {WEBHOOK_URL}")
 
         # Use aiogram's built‑in SimpleRequestHandler for webhook handling.
         from aiogram.webhook.aiohttp_server import SimpleRequestHandler
@@ -58,7 +59,6 @@ async def on_startup(_: Dispatcher):
         await site.start()
         print(f'✅ Webhook server running on port {port} – press Ctrl+C to stop')
         await asyncio.Event().wait()
-
     else:
         print('WEBHOOK_URL not set – running in long‑polling mode for testing')
         # Delete any lingering webhook to avoid conflict with long-polling
