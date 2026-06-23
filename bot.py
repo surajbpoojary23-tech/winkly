@@ -243,24 +243,48 @@ async def handle_name(message: types.Message, state: FSMContext):
 
 # ── Age ───────────────────────────────────────────────────────────────────────
 
+# ── DOB → calculate age ─────────────────────────────────────────────────────────
+
+from datetime import date
+
+def parse_dob(raw: str):
+    """Return date object or None. Accepts DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY."""
+    for sep in ('/', '-', '.'):
+        if sep in raw:
+            parts = raw.split(sep)
+            if len(parts) == 3:
+                d, m, y = parts
+                if len(y) == 4 and y.isdigit():
+                    return date(int(y), int(m), int(d))
+    return None
+
+
+def calc_age(born: date) -> int:
+    today = date.today()
+    age = today.year - born.year
+    if (today.month, today.day) < (born.month, born.day):
+        age -= 1
+    return age
+
+
 @dp.message(StateFilter(Setup.age))
-async def handle_age(message: types.Message, state: FSMContext):
-    try:
-        try:
-            age = int(message.text.strip())
-        except ValueError:
-            await message.answer("⚠️ Enter a number, e.g. 28. Try again:")
-            return
-        if not (18 <= age <= 100):
-            await message.answer("⚠️ You must be between 18 and 100. Try again:")
-            return
-        await state.update_data(age=str(age))
-        await message.answer(f"🎂 *{age}* — perfect!")
-        await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
-    except Exception as e:
-        import traceback
-        await message.answer(f"⚠️ Error: {e}")
-        traceback.print_exc()
+async def handle_dob(message: types.Message, state: FSMContext):
+    raw = message.text.strip()
+    dob = parse_dob(raw)
+    if dob is None:
+        await message.answer(
+            "⚠️ Enter your date of birth in *DD / MM / YYYY* format.\n"
+            "Example: *15 / 08 / 1995*",
+            parse_mode='Markdown',
+        )
+        return
+    age = calc_age(dob)
+    if not (18 <= age <= 100):
+        await message.answer("⚠️ You must be at least 18 and no older than 100. Try again:")
+        return
+    await state.update_data(age=str(age), dob=str(dob))
+    await message.answer(f"🎂 *{age}* years old — perfect!")
+    await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
 
 
 # ── Gender ────────────────────────────────────────────────────────────────────
@@ -358,7 +382,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of 5\n\n"
-            "🎂 *How old are you?*\n_(just the number, e.g. 28)_",
+            "🎂 *When were you born?*\n_(DD / MM / YYYY — e.g. 15 / 08 / 1995)_",
             parse_mode='Markdown',
             reply_markup=back_kb(),
         )
