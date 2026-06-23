@@ -1,7 +1,9 @@
 import os
 import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, Text, StateFilter
+from aiogram.filters import Command
+from aiogram.filters.text import Text
+from aiogram.filters.state import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
