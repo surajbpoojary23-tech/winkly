@@ -63,10 +63,14 @@ def main():
     
     try:
         # Import and run the bot
-        from bot import on_startup, dp
+        from bot import on_startup, dp, bot
+        import asyncio
+        
+        # Force reset any stale webhook or long-poll session
+        asyncio.run(bot.delete_webhook(drop_pending_updates=True))
+        print("✅ Cleared any existing Telegram webhook/session")
         
         # Run the bot
-        import asyncio
         asyncio.run(on_startup(dp))
         
     except KeyboardInterrupt:

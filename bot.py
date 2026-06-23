@@ -56,11 +56,14 @@ async def on_startup(_: Dispatcher):
         port = int(os.getenv('PORT', '8080'))
         site = web.TCPSite(runner, host='0.0.0.0', port=port)
         await site.start()
-        print(f'\u2705 Webhook server running on port {port} – press Ctrl+C to stop')
+        print(f'✅ Webhook server running on port {port} – press Ctrl+C to stop')
         await asyncio.Event().wait()
 
     else:
         print('WEBHOOK_URL not set – running in long‑polling mode for testing')
+        # Delete any lingering webhook to avoid conflict with long-polling
+        await bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Cleared any existing webhook, starting long-polling...")
         await dp.start_polling(bot, skip_updates=False)
 
 if __name__ == '__main__':
