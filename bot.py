@@ -53,9 +53,10 @@ async def on_startup(_: Dispatcher):
         handler.register(app, path='/')
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, host='0.0.0.0', port=int(os.getenv('PORT', '8080')))
+        port = int(os.getenv('PORT', '8080'))
+        site = web.TCPSite(runner, host='0.0.0.0', port=port)
         await site.start()
-        print('\u2705 Webhook server running – press Ctrl+C to stop')
+        print(f'\u2705 Webhook server running on port {port} – press Ctrl+C to stop')
         await asyncio.Event().wait()
 
     else:

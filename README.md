@@ -34,7 +34,24 @@ The bot will start polling. Open Telegram, send `/start`, share your location an
 4. Add **Environment Variables**:
    - `BOT_TOKEN` – the token you received from @BotFather.
    - `REDIS_URL` – your Upstash Redis endpoint (e.g. `rediss://...`).
+   - `PORT` – port to bind to (default: 8080, required for webhook mode)
+   - `WEBHOOK_URL` – full webhook URL (e.g. `https://your-service.onrender.com/`)
 5. Deploy. Render will build the Docker image and start the container.
+
+### ⚠️ Important: Fix TelegramConflictError
+The error "Conflict: terminated by other getUpdates request" occurs when multiple bot instances run simultaneously. To fix this:
+
+**Option 1: Use Webhook Mode (Recommended)**
+- Set `WEBHOOK_URL` to your Render service URL (e.g. `https://your-service.onrender.com/`)
+- This eliminates polling conflicts and is more reliable for production
+
+**Option 2: Use Long-Polling with Single Instance**
+- Ensure only one bot instance runs
+- Set `skip_updates=True` to skip pending updates on restart
+
+**Option 3: Use Render's Health Check**
+- Add a health check endpoint to verify bot is running
+- Use Render's auto-scaling to prevent multiple instances
 
 ## How It Works (internals)
 - **Redis GEO** (`dating:users`) stores each user’s longitude/latitude.
