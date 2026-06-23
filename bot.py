@@ -75,12 +75,17 @@ def profile_summary(data: dict) -> str:
     return (
         "✅ *Your Profile*\n\n"
         f"📛  Name:       {data.get('name', '—')}\n"
-        f"🎂  Age:        {data.get('age', '—')}\n"
+        f"🎂  Age / DOB:   {data.get('age', '—')} / {data.get('dob', '—')}\n"
         f"⚧  Gender:     {data.get('gender', '—')}\n"
         f"📝  Bio:        {data.get('bio', '—') or '—'}\n"
         f"❤️  Interested: {data.get('preferred_gender', '—')}\n"
         f"📍  Location:   {_lat_lon(data)}\n"
     )
+
+
+def _clean(data: dict) -> dict:
+    """Strip internal FSM fields before saving to user_profiles."""
+    return {k: v for k, v in data.items() if k not in ('edit_mode', 'dob')}
 
 
 def _lat_lon(data: dict) -> str:
@@ -184,7 +189,7 @@ async def go_back(cb: types.CallbackQuery, state: FSMContext):
 async def back_to_profile(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     data = await state.get_data()
-    user_profiles[uid] = data
+    user_profiles[uid] = _clean(data)
     await state.clear()
     await cb.message.edit_text(
         "✅ *Profile updated!*\n\n" + profile_summary(data),
@@ -259,11 +264,11 @@ async def handle_name(message: types.Message, state: FSMContext):
             await message.answer("⚠️ Name must be at least 2 characters. Try again:")
             return
         await state.update_data(name=name)
-        await state.update_data(edit_mode=False)
         await message.answer(f"📛 *{name}* — got it!")
 
         data = await state.get_data()
         if data.get('edit_mode'):
+            await state.update_data(edit_mode=False)
             await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
         else:
             await advance_to(state, Setup.age, message.chat.id, message.from_user.id)
@@ -315,11 +320,11 @@ async def handle_dob(message: types.Message, state: FSMContext):
         await message.answer("⚠️ You must be at least 18 and no older than 100. Try again:")
         return
     await state.update_data(age=str(age), dob=str(dob))
-    await state.update_data(edit_mode=False)
     await message.answer(f"🎂 *{age}* years old — perfect!")
 
     data = await state.get_data()
     if data.get('edit_mode'):
+        await state.update_data(edit_mode=False)
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
     else:
         await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
@@ -349,11 +354,11 @@ async def handle_gender(message: types.Message, state: FSMContext):
         )
         return
     await state.update_data(gender=gender)
-    await state.update_data(edit_mode=False)
     await message.answer(f"⚧ *{gender}* — noted!", reply_markup=ReplyKeyboardRemove())
 
     data = await state.get_data()
     if data.get('edit_mode'):
+        await state.update_data(edit_mode=False)
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
     else:
         await advance_to(state, Setup.bio, message.chat.id, message.from_user.id)
@@ -367,7 +372,12 @@ async def handle_gender_btn(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(gender=gender)
     await cb.message.edit_text(f"⚧ *{gender}* — noted!")
     await cb.answer()
-    await advance_to(state, Setup.bio, cb.message.chat.id, cb.from_user.id)
+
+    data = await state.get_data()
+    if data.get('edit_mode'):
+        await advance_to(state, Setup.confirm, cb.message.chat.id, cb.from_user.id)
+    else:
+        await advance_to(state, Setup.bio, cb.message.chat.id, cb.from_user.id)
 
 
 # ── Bio ───────────────────────────────────────────────────────────────────────
@@ -379,11 +389,11 @@ async def handle_bio(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Please write at least a sentence or two:")
         return
     await state.update_data(bio=bio)
-    await state.update_data(edit_mode=False)
     await message.answer("📝 *Bio saved!*")
 
     data = await state.get_data()
     if data.get('edit_mode'):
+        await state.update_data(edit_mode=False)
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
     else:
         await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
@@ -394,7 +404,13 @@ async def skip_bio(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(bio="")
     await cb.message.edit_text("📝 *Bio skipped.*")
     await cb.answer()
-    await advance_to(state, Setup.preferred_gender, cb.message.chat.id, cb.from_user.id)
+
+    data = await state.get_data()
+    if data.get('edit_mode'):
+        await state.update_data(edit_mode=False)
+        await advance_to(state, Setup.confirm, cb.message.chat.id, cb.from_user.id)
+    else:
+        await advance_to(state, Setup.preferred_gender, cb.message.chat.id, cb.from_user.id)
 
 
 # ── Preferred Gender ─────────────────────────────────────────────────────────
@@ -424,7 +440,6 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
         )
         return
     await state.update_data(preferred_gender=pref)
-    await state.update_data(edit_mode=False)
     await message.answer(
         f"❤️ *{pref}* — noted!",
         reply_markup=ReplyKeyboardRemove(),
@@ -432,6 +447,7 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     if data.get('edit_mode'):
+        await state.update_data(edit_mode=False)
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
     else:
         await advance_to(state, Setup.location, message.chat.id, message.from_user.id)
@@ -539,7 +555,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
     elif step == 'confirm':
         data = await state.get_data()
         uid  = user_id
-        user_profiles[uid] = data
+        user_profiles[uid] = _clean(data)
         await state.clear()
 
         await bot.send_message(
