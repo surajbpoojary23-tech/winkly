@@ -67,11 +67,9 @@ def main():
         
         # Run everything in a single event loop
         async def startup_tasks():
-            # Force reset any stale webhook or long-poll session
-            await bot.delete_webhook(drop_pending_updates=True)
-            print("✅ Cleared any existing Telegram webhook/session")
-            
-            # Now start the bot
+            # set_webhook() handles updating the URL safely — do NOT delete first
+            # (delete_webhook would wipe the config and leave Telegram with no endpoint)
+            print("✅ Registering webhook and starting server...")
             await on_startup(dp)
         
         # Run the bot
