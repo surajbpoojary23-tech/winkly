@@ -108,7 +108,7 @@ def back_kb() -> InlineKeyboardMarkup:
 # ── /start ─────────────────────────────────────────────────────────────────────
 
 @dp.message(Command('start'))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
     uid = message.from_user.id
 
     if uid in user_profiles:
@@ -124,7 +124,6 @@ async def cmd_start(message: types.Message):
         return
 
     # New user — start profile setup immediately
-    state = dp.current_state(chat=message.chat.id, user=uid)
     await state.set_state(Setup.name)
     await message.answer(
         "👋 Hey! I'm *Winkly*.\n\n"
