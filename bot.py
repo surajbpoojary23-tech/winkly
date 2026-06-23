@@ -93,11 +93,12 @@ def _lat_lon(data: dict) -> str:
 
 def profile_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️  Edit Name",    callback_data='edit_name'),
-         InlineKeyboardButton(text="✏️  Edit Age",    callback_data='edit_age')],
-        [InlineKeyboardButton(text="✏️  Edit Gender", callback_data='edit_gender'),
-         InlineKeyboardButton(text="✏️  Edit Bio",   callback_data='edit_bio')],
-        [InlineKeyboardButton(text="✏️  Edit Location", callback_data='edit_location')],
+        [InlineKeyboardButton(text="✏️  Edit Name",       callback_data='edit_name'),
+         InlineKeyboardButton(text="✏️  Edit DOB",       callback_data='edit_age')],
+        [InlineKeyboardButton(text="✏️  Edit Gender",    callback_data='edit_gender'),
+         InlineKeyboardButton(text="✏️  Edit Interested", callback_data='edit_preferred_gender')],
+        [InlineKeyboardButton(text="✏️  Edit Bio",       callback_data='edit_bio'),
+         InlineKeyboardButton(text="✏️  Edit Location",  callback_data='edit_location')],
         [InlineKeyboardButton(text="❤️  Find Matches Now", callback_data='do_match')],
     ])
 
@@ -105,7 +106,12 @@ def profile_kb() -> InlineKeyboardMarkup:
 def back_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="« Back", callback_data='back')],
-        [InlineKeyboardButton(text="❌ Cancel Setup", callback_data='cancel_setup')],
+    ])
+
+
+def profile_back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="« Back to Profile", callback_data='back_to_profile')],
     ])
 
 
@@ -174,6 +180,20 @@ async def go_back(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
+@dp.callback_query(lambda cb: cb.data == 'back_to_profile', StateFilter(Setup))
+async def back_to_profile(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    data = await state.get_data()
+    user_profiles[uid] = data
+    await state.clear()
+    await cb.message.edit_text(
+        "✅ *Profile updated!*\n\n" + profile_summary(data),
+        parse_mode='Markdown',
+        reply_markup=profile_kb(),
+    )
+    await cb.answer()
+
+
 # ── Cancel setup inline button ─────────────────────────────────────────────────
 
 @dp.callback_query(lambda cb: cb.data == 'cancel_setup', StateFilter(Setup))
@@ -212,17 +232,18 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
     idx = PROGRESS_STEPS.index(field)
 
     prompts = {
-        "name":    "📛 *What's your name?*",
-        "age":     "🎂 *How old are you?* _(number only)_",
-        "gender":  "⚧ *What's your gender?*",
-        "bio":     "📝 *Tell us about yourself:*\n_(hobbies, what you like, what you're looking for…)_",
-        "location":"📍 *Share your location* so we can find matches nearby:",
+        "name":             "📛 *What's your name?*",
+        "age":              "🎂 *When were you born?*\n_(DD / MM / YYYY — e.g. 15 / 08 / 1995)_",
+        "gender":           "⚧ *What's your gender?*",
+        "bio":              "📝 *Tell us about yourself:*\n_(hobbies, what you like, what you're looking for…)_",
+        "preferred_gender": "❤️ *Who are you interested in?*",
+        "location":         "📍 *Share your location* so we can find matches nearby:",
     }
     await cb.message.edit_text(
         f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
         f"✏️  {prompts.get(field, 'Enter:')}",
         parse_mode='Markdown',
-        reply_markup=back_kb(),
+        reply_markup=profile_back_kb(),
     )
     await cb.answer()
 
