@@ -53,7 +53,6 @@ class ProcessLock:
 def main():
     # Create lock file in the bot directory
     lock_file_path = os.path.join(os.path.dirname(__file__), '.bot_instance.lock')
-    
     lock = ProcessLock(lock_file_path)
     
     if not lock.acquire():
@@ -82,6 +81,8 @@ def main():
         print("\n⚠️  Bot stopped by user")
     except Exception as e:
         print(f"❌ Bot error: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     finally:
         lock.release()
