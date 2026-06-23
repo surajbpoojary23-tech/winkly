@@ -44,6 +44,7 @@ class Setup(StatesGroup):
 user_profiles: dict = {}
 
 PROGRESS_STEPS = ["name", "age", "gender", "bio", "preferred_gender", "location"]
+TOTAL_STEPS = 6
 
 STEP_LABELS = {
     "name":             "📛  Name",
@@ -132,7 +133,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "👋 Hey! I'm *Winkly*.\n\n"
         "I'll help you find people nearby. Let's set up your profile — "
         "it only takes ~30 seconds.\n\n"
-        f"_{progress_bar(0)}_  Step 1 of 5\n\n"
+        f"_{progress_bar(0)}_  Step 1 of {TOTAL_STEPS}\n\n"
         "📛 *What's your name?*",
         parse_mode='Markdown',
     )
@@ -166,7 +167,7 @@ async def go_back(cb: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(getattr(Setup, prev_step))
     await cb.message.edit_text(
-        f"_{progress_bar(idx - 1)}_  Step {idx} of 5\n\n"
+        f"_{progress_bar(idx - 1)}_  Step {idx} of {TOTAL_STEPS}\n\n"
         f"Go back — {prev_label}?\n\n_Enter your answer below._",
         parse_mode='Markdown',
     )
@@ -192,7 +193,7 @@ async def retake(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.edit_text(
         "🔄 Let's start fresh!\n\n"
-        f"_{progress_bar(0)}_  Step 1 of 5\n\n"
+        f"_{progress_bar(0)}_  Step 1 of {TOTAL_STEPS}\n\n"
         "📛 *What's your name?*",
         parse_mode='Markdown',
     )
@@ -218,7 +219,7 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
         "location":"📍 *Share your location* so we can find matches nearby:",
     }
     await cb.message.edit_text(
-        f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+        f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
         f"✏️  {prompts.get(field, 'Enter:')}",
         parse_mode='Markdown',
         reply_markup=back_kb(),
@@ -386,12 +387,12 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
 
 # ── Location ──────────────────────────────────────────────────────────────────
 
-@dp.message(StateFilter(Setup.location))
+@dp.message(lambda m: not m.location, StateFilter(Setup.location))
 async def handle_location_text(message: types.Message, state: FSMContext):
     await message.answer(
         "📍 Please use the *Share Location* button below:",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text='📍 Share Location', request_location=True)]],
+            keyboard=[[KeyboardButton(text='📍 Share My Location', request_location=True)]],
             resize_keyboard=True, one_time_keyboard=True,
         ),
     )
@@ -421,16 +422,15 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 1
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "🎂 *When were you born?*\n_(DD / MM / YYYY — e.g. 15 / 08 / 1995)_",
             parse_mode='Markdown',
-            reply_markup=back_kb(),
         )
     elif step == 'gender':
         idx = 2
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "⚧ *What's your gender?*",
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardMarkup(
@@ -446,7 +446,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 3
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "📝 *Tell us a bit about yourself*\n"
             "_(hobbies, what you like, what you're looking for…)_\n\n"
             "_Or tap /skip to skip this step._",
@@ -460,7 +460,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 4
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "❤️ *Who are you interested in?*",
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardMarkup(
@@ -476,7 +476,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 5
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "📍 *Share your location* so we can find matches near you:",
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardMarkup(
