@@ -292,12 +292,15 @@ async def handle_dob(message: types.Message, state: FSMContext):
 @dp.message(StateFilter(Setup.gender))
 async def handle_gender(message: types.Message, state: FSMContext):
     raw = message.text.strip().lower()
-    gender_map = {
-        'male': 'Male', 'm': 'Male', '👨': 'Male',
-        'female': 'Female', 'f': 'Female', '👩': 'Female',
-        'other': 'Other', '⚧': 'Other',
+    # Try exact match first (full button text like "👨 male"), then fall back to individual emoji
+    exact_map = {
+        '👨 male': 'Male', '👩 female': 'Female', '⚧ other': 'Other',
     }
-    gender = gender_map.get(raw)
+    if raw in exact_map:
+        gender = exact_map[raw]
+    else:
+        emoji_map = {'👨': 'Male', '👩': 'Female', '⚧': 'Other'}
+        gender = emoji_map.get(raw)
     if not gender:
         await message.answer(
             "⚠️ Please tap one of the buttons or type: Male / Female / Other",
