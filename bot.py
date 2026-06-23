@@ -1,9 +1,8 @@
 import os
 import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.filters.text import Text
-from aiogram.filters.state import StateFilter
+from aiogram.filters import Command, StateFilter
+from magic_filter import F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -99,7 +98,7 @@ async def cmd_start(message: types.Message):
 
 # ── Profile Setup ─────────────────────────────────────────────────────────────
 
-@dp.callback_query(Text('profile_start'), StateFilter(None))
+@dp.callback_query(F.data == 'profile_start', StateFilter(None))
 async def profile_start(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_reply_markup(reply_markup=None)
     await cb.message.answer("👤 Let's set up your profile!\n\nI'll ask you a few quick questions.")
@@ -152,11 +151,10 @@ async def ask_location(message: types.Message, state: FSMContext):
 
 # ── Confirmation flow ──────────────────────────────────────────────────────────
 
-@dp.callback_query(Text('confirm_yes'), StateFilter(None))
-async def confirm_yes(cb: types.CallbackQuery):
+@dp.callback_query(F.data == 'confirm_yes')
+async def confirm_yes(cb: types.CallbackQuery, state: FSMContext):
     """User confirmed their last answer — advance to the next question."""
     await cb.message.edit_reply_markup(reply_markup=None)
-    state = cb.message.confirm_state   # stored as a custom attr below
     step = await state.get_state()
     message = cb.message
 
@@ -173,7 +171,7 @@ async def confirm_yes(cb: types.CallbackQuery):
     await cb.answer()
 
 
-@dp.callback_query(Text('confirm_no'), StateFilter(None))
+@dp.callback_query(F.data == 'confirm_no')
 async def confirm_no(cb: types.CallbackQuery, state: FSMContext):
     """User wants to re-enter their answer — go back to that step."""
     await cb.message.edit_reply_markup(reply_markup=None)
@@ -232,8 +230,6 @@ async def handle_name(message: types.Message, state: FSMContext):
         return
     await state.update_data(name=name)
     msg = await message.answer(f"📛 *{name}* — is that right?", reply_markup=confirm_kb(), parse_mode='Markdown')
-    # Attach state for the confirm handler
-    msg.confirm_state = state
 
 
 @dp.message(StateFilter(ProfileSetup.waiting_age))
@@ -248,7 +244,6 @@ async def handle_age(message: types.Message, state: FSMContext):
         return
     await state.update_data(age=str(age))
     msg = await message.answer(f"🎂 Age *{age}* — correct?", reply_markup=confirm_kb(), parse_mode='Markdown')
-    msg.confirm_state = state
 
 
 @dp.message(StateFilter(ProfileSetup.waiting_gender))
@@ -269,8 +264,6 @@ async def handle_gender(message: types.Message, state: FSMContext):
         reply_markup=confirm_kb(),
         parse_mode='Markdown',
     )
-    msg = await message
-    msg.confirm_state = state
 
 
 @dp.message(StateFilter(ProfileSetup.waiting_bio))
@@ -280,12 +273,11 @@ async def handle_bio(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Please write at least a short sentence about yourself.")
         return
     await state.update_data(bio=bio)
-    msg = await message.answer(
+    await message.answer(
         f"📝 Bio:\n_{bio}_",
         reply_markup=confirm_kb(),
         parse_mode='Markdown',
     )
-    msg.confirm_state = state
 
 
 @dp.message(StateFilter(ProfileSetup.waiting_location))
@@ -311,7 +303,7 @@ async def handle_location_ok(message: types.Message, state: FSMContext):
         reply_markup=ReplyKeyboardRemove(),
         parse_mode='Markdown',
     )
-    msg = await message.answer(
+    await message.answer(
         "✅ All done! Tap *Confirm* to finish setting up your profile.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[
@@ -320,12 +312,9 @@ async def handle_location_ok(message: types.Message, state: FSMContext):
         ),
         parse_mode='Markdown',
     )
-    msg.confirm_state = state
 
 
 # ── Find Match (placeholder) ───────────────────────────────────────────────────
-
-@dp.callback_query(Text('find_match'))
 async def find_match(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     profile = user_profiles.get(uid)
