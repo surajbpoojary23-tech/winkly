@@ -228,6 +228,7 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
     field = cb.data.replace('edit_', '')
     if not hasattr(Setup, field):
         return
+    await state.update_data(edit_mode=True)
     await state.set_state(getattr(Setup, field))
     idx = PROGRESS_STEPS.index(field)
 
@@ -258,8 +259,14 @@ async def handle_name(message: types.Message, state: FSMContext):
             await message.answer("⚠️ Name must be at least 2 characters. Try again:")
             return
         await state.update_data(name=name)
+        await state.update_data(edit_mode=False)
         await message.answer(f"📛 *{name}* — got it!")
-        await advance_to(state, Setup.age, message.chat.id, message.from_user.id)
+
+        data = await state.get_data()
+        if data.get('edit_mode'):
+            await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+        else:
+            await advance_to(state, Setup.age, message.chat.id, message.from_user.id)
     except Exception as e:
         import traceback
         await message.answer(f"⚠️ Error: {e}")
@@ -308,8 +315,14 @@ async def handle_dob(message: types.Message, state: FSMContext):
         await message.answer("⚠️ You must be at least 18 and no older than 100. Try again:")
         return
     await state.update_data(age=str(age), dob=str(dob))
+    await state.update_data(edit_mode=False)
     await message.answer(f"🎂 *{age}* years old — perfect!")
-    await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
+
+    data = await state.get_data()
+    if data.get('edit_mode'):
+        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+    else:
+        await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
 
 
 # ── Gender ────────────────────────────────────────────────────────────────────
@@ -336,8 +349,14 @@ async def handle_gender(message: types.Message, state: FSMContext):
         )
         return
     await state.update_data(gender=gender)
+    await state.update_data(edit_mode=False)
     await message.answer(f"⚧ *{gender}* — noted!", reply_markup=ReplyKeyboardRemove())
-    await advance_to(state, Setup.bio, message.chat.id, message.from_user.id)
+
+    data = await state.get_data()
+    if data.get('edit_mode'):
+        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+    else:
+        await advance_to(state, Setup.bio, message.chat.id, message.from_user.id)
 
 
 @dp.callback_query(lambda cb: cb.data.startswith('gender_'), StateFilter(Setup.gender))
@@ -360,8 +379,14 @@ async def handle_bio(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Please write at least a sentence or two:")
         return
     await state.update_data(bio=bio)
+    await state.update_data(edit_mode=False)
     await message.answer("📝 *Bio saved!*")
-    await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
+
+    data = await state.get_data()
+    if data.get('edit_mode'):
+        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+    else:
+        await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
 
 
 @dp.callback_query(lambda cb: cb.data == 'skip_bio', StateFilter(Setup.bio))
@@ -399,11 +424,17 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
         )
         return
     await state.update_data(preferred_gender=pref)
+    await state.update_data(edit_mode=False)
     await message.answer(
         f"❤️ *{pref}* — noted!",
         reply_markup=ReplyKeyboardRemove(),
     )
-    await advance_to(state, Setup.location, message.chat.id, message.from_user.id)
+
+    data = await state.get_data()
+    if data.get('edit_mode'):
+        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+    else:
+        await advance_to(state, Setup.location, message.chat.id, message.from_user.id)
 
 
 # ── Location ──────────────────────────────────────────────────────────────────
