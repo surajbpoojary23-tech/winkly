@@ -30,26 +30,28 @@ dp = Dispatcher(bot=bot, storage=storage)
 # ── FSM ───────────────────────────────────────────────────────────────────────
 
 class Setup(StatesGroup):
-    name     = State()
-    age       = State()
-    gender    = State()
-    bio       = State()
-    location  = State()
-    confirm   = State()   # final review screen
+    name              = State()
+    age               = State()
+    gender            = State()
+    bio               = State()
+    preferred_gender  = State()
+    location          = State()
+    confirm           = State()   # final review screen
 
 
 # ── In-memory profile store ───────────────────────────────────────────────────
 # {user_id: {"name":…, "age":…, "gender":…, "bio":…, "lat":…, "lon":…}}
 user_profiles: dict = {}
 
-PROGRESS_STEPS = ["name", "age", "gender", "bio", "location"]
+PROGRESS_STEPS = ["name", "age", "gender", "bio", "preferred_gender", "location"]
 
 STEP_LABELS = {
-    "name":    "📛  Name",
-    "age":     "🎂  Age",
-    "gender":  "⚧  Gender",
-    "bio":     "📝  Bio",
-    "location":"📍  Location",
+    "name":             "📛  Name",
+    "age":              "🎂  DOB",
+    "gender":           "⚧  Gender",
+    "bio":              "📝  Bio",
+    "preferred_gender": "❤️  Interested In",
+    "location":         "📍  Location",
 }
 
 
@@ -71,11 +73,12 @@ def step_index(state: str) -> int:
 def profile_summary(data: dict) -> str:
     return (
         "✅ *Your Profile*\n\n"
-        f"📛  Name:    {data.get('name', '—')}\n"
-        f"🎂  Age:     {data.get('age', '—')}\n"
-        f"⚧  Gender:  {data.get('gender', '—')}\n"
-        f"📝  Bio:     {data.get('bio', '—')}\n"
-        f"📍  Location: {_lat_lon(data)}\n"
+        f"📛  Name:       {data.get('name', '—')}\n"
+        f"🎂  Age:        {data.get('age', '—')}\n"
+        f"⚧  Gender:     {data.get('gender', '—')}\n"
+        f"📝  Bio:        {data.get('bio', '—') or '—'}\n"
+        f"❤️  Interested: {data.get('preferred_gender', '—')}\n"
+        f"📍  Location:   {_lat_lon(data)}\n"
     )
 
 
@@ -215,7 +218,7 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
         "location":"📍 *Share your location* so we can find matches nearby:",
     }
     await cb.message.edit_text(
-        f"_{progress_bar(idx)}_  Step {idx + 1} of 5\n\n"
+        f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
         f"✏️  {prompts.get(field, 'Enter:')}",
         parse_mode='Markdown',
         reply_markup=back_kb(),
@@ -336,7 +339,7 @@ async def handle_bio(message: types.Message, state: FSMContext):
         return
     await state.update_data(bio=bio)
     await message.answer("📝 *Bio saved!*")
-    await advance_to(state, Setup.location, message.chat.id, message.from_user.id)
+    await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
 
 
 @dp.callback_query(lambda cb: cb.data == 'skip_bio', StateFilter(Setup.bio))
@@ -344,7 +347,41 @@ async def skip_bio(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(bio="")
     await cb.message.edit_text("📝 *Bio skipped.*")
     await cb.answer()
-    await advance_to(state, Setup.location, cb.message.chat.id, cb.from_user.id)
+    await advance_to(state, Setup.preferred_gender, cb.message.chat.id, cb.from_user.id)
+
+
+# ── Preferred Gender ─────────────────────────────────────────────────────────
+
+@dp.message(StateFilter(Setup.preferred_gender))
+async def handle_preferred_gender(message: types.Message, state: FSMContext):
+    raw = message.text.strip().lower()
+    exact_map = {
+        '👨 men': 'Men', '👩 women': 'Women', '👥 everyone': 'Everyone',
+    }
+    if raw in exact_map:
+        pref = exact_map[raw]
+    else:
+        emoji_map = {'👨': 'Men', '👩': 'Women', '👥': 'Everyone'}
+        pref = emoji_map.get(raw)
+    if not pref:
+        await message.answer(
+            "⚠️ Please tap one of the buttons: Men / Women / Everyone",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text='👨 Men')],
+                    [KeyboardButton(text='👩 Women')],
+                    [KeyboardButton(text='👥 Everyone')],
+                ],
+                resize_keyboard=True, one_time_keyboard=True,
+            ),
+        )
+        return
+    await state.update_data(preferred_gender=pref)
+    await message.answer(
+        f"❤️ *{pref}* — noted!",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await advance_to(state, Setup.location, message.chat.id, message.from_user.id)
 
 
 # ── Location ──────────────────────────────────────────────────────────────────
@@ -384,7 +421,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 1
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 5\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
             "🎂 *When were you born?*\n_(DD / MM / YYYY — e.g. 15 / 08 / 1995)_",
             parse_mode='Markdown',
             reply_markup=back_kb(),
@@ -393,7 +430,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 2
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 5\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
             "⚧ *What's your gender?*",
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardMarkup(
@@ -409,7 +446,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         idx = 3
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 5\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
             "📝 *Tell us a bit about yourself*\n"
             "_(hobbies, what you like, what you're looking for…)_\n\n"
             "_Or tap /skip to skip this step._",
@@ -419,11 +456,27 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
                 [InlineKeyboardButton(text="« Back", callback_data='back')],
             ]),
         )
-    elif step == 'location':
+    elif step == 'preferred_gender':
         idx = 4
         await bot.send_message(
             chat_id,
-            f"_{progress_bar(idx)}_  Step {idx + 1} of 5\n\n"
+            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
+            "❤️ *Who are you interested in?*",
+            parse_mode='Markdown',
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text='👨 Men')],
+                    [KeyboardButton(text='👩 Women')],
+                    [KeyboardButton(text='👥 Everyone')],
+                ],
+                resize_keyboard=True, one_time_keyboard=True,
+            ),
+        )
+    elif step == 'location':
+        idx = 5
+        await bot.send_message(
+            chat_id,
+            f"_{progress_bar(idx)}_  Step {idx + 1} of 6\n\n"
             "📍 *Share your location* so we can find matches near you:",
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardMarkup(
