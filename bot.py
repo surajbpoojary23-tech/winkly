@@ -124,6 +124,8 @@ async def cmd_start(message: types.Message):
         return
 
     # New user — start profile setup immediately
+    state = dp.current_state(chat=message.chat.id, user=uid)
+    await state.set_state(Setup.name)
     await message.answer(
         "👋 Hey! I'm *Winkly*.\n\n"
         "I'll help you find people nearby. Let's set up your profile — "
@@ -132,7 +134,6 @@ async def cmd_start(message: types.Message):
         "📛 *What's your name?*",
         parse_mode='Markdown',
     )
-    await dp.current_state(chat=message.chat.id, user=uid).set_state(Setup.name)
 
 
 # ── /cancel ───────────────────────────────────────────────────────────────────
@@ -227,13 +228,18 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Setup.name))
 async def handle_name(message: types.Message, state: FSMContext):
-    name = message.text.strip()
-    if len(name) < 2:
-        await message.answer("⚠️ Name must be at least 2 characters. Try again:")
-        return
-    await state.update_data(name=name)
-    await message.answer(f"📛 *{name}* — got it!")
-    await advance_to(state, Setup.age, message.chat.id, message.from_user.id)
+    try:
+        name = message.text.strip()
+        if len(name) < 2:
+            await message.answer("⚠️ Name must be at least 2 characters. Try again:")
+            return
+        await state.update_data(name=name)
+        await message.answer(f"📛 *{name}* — got it!")
+        await advance_to(state, Setup.age, message.chat.id, message.from_user.id)
+    except Exception as e:
+        import traceback
+        await message.answer(f"⚠️ Error: {e}")
+        traceback.print_exc()
 
 
 # ── Age ───────────────────────────────────────────────────────────────────────
@@ -241,16 +247,21 @@ async def handle_name(message: types.Message, state: FSMContext):
 @dp.message(StateFilter(Setup.age))
 async def handle_age(message: types.Message, state: FSMContext):
     try:
-        age = int(message.text.strip())
-    except ValueError:
-        await message.answer("⚠️ Enter a number, e.g. 28. Try again:")
-        return
-    if not (18 <= age <= 100):
-        await message.answer("⚠️ You must be between 18 and 100. Try again:")
-        return
-    await state.update_data(age=str(age))
-    await message.answer(f"🎂 *{age}* — perfect!")
-    await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
+        try:
+            age = int(message.text.strip())
+        except ValueError:
+            await message.answer("⚠️ Enter a number, e.g. 28. Try again:")
+            return
+        if not (18 <= age <= 100):
+            await message.answer("⚠️ You must be between 18 and 100. Try again:")
+            return
+        await state.update_data(age=str(age))
+        await message.answer(f"🎂 *{age}* — perfect!")
+        await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
+    except Exception as e:
+        import traceback
+        await message.answer(f"⚠️ Error: {e}")
+        traceback.print_exc()
 
 
 # ── Gender ────────────────────────────────────────────────────────────────────
@@ -447,7 +458,19 @@ async def cmd_profile(message: types.Message):
     )
 
 
-# ── Webhook ───────────────────────────────────────────────────────────────────
+# ── Fallback debug — catches any message not matched above ───────────────────
+
+@dp.message()
+async def fallback(message: types.Message):
+    """Catch-all: shows what state the user is in so we can debug mismatches."""
+    state = dp.current_state(chat=message.chat.id, user=message.from_user.id)
+    current = await state.get_state()
+    await message.answer(
+        f"⚠️ Unexpected message: `{message.text[:50]}`\n"
+        f"Current FSM state: `{current}`\n\n"
+        "_Send /start to restart._",
+        parse_mode='Markdown',
+    )
 
 async def on_startup(_: Dispatcher):
     if WEBHOOK_URL:
