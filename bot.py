@@ -514,8 +514,7 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
     p = user_profiles[uid]
     await cb.message.answer(
         f"🔎 Looking for matches near *{p['name']}*…\n"
-        f"📍 {_lat_lon(p)}\n\n"
-        "_Matching is not yet implemented._",
+        f"📍 {_lat_lon(p)}",
         parse_mode='Markdown',
     )
     await cb.answer()
