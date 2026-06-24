@@ -1214,9 +1214,10 @@ async def start_chat(cb: types.CallbackQuery):
     partner_name = user_profiles[partner]['name']
     await cb.message.edit_text(
         f"💬 *Chat started with {partner_name}*\n\n"
-        "Send your messages below. Tap below to end this chat when you're finished.",
+        "Send your messages below. Tap below to say 'Hi' or end the chat.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{partner}')],
             [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
         ]),
     )
@@ -1225,9 +1226,10 @@ async def start_chat(cb: types.CallbackQuery):
     await bot.send_message(
         partner,
         f"💬 *{user_profiles[uid]['name']}* started chatting!\n\n"
-        "You can end this chat when you're finished.",
+        "You can say 'Hi' or end the chat.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{uid}')],
             [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{uid}')],
         ]),
     )
@@ -1387,6 +1389,48 @@ async def back_to_profile(cb: types.CallbackQuery, state: FSMContext):
         reply_markup=profile_kb(),
     )
     await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('say_hi:'))
+async def say_hi(cb: types.CallbackQuery):
+    """Send a 'Hi' message to the chat partner."""
+    uid = cb.from_user.id
+    partner = int(cb.data.split(':')[1])
+
+    # Verify mutual match and active chat
+    if uid not in active_matches or partner not in active_matches.get(uid, {}):
+        await cb.answer("⚠️ You are not matched with this user.", show_alert=True)
+        return
+    
+    if uid not in current_chat or current_chat[uid] != partner:
+        await cb.answer("⚠️ You are not in an active chat with this user.", show_alert=True)
+        return
+
+    partner_name = user_profiles[partner]['name']
+    
+    # Send 'Hi' message to partner
+    try:
+        await bot.send_message(
+            partner,
+            f"👋 *{user_profiles[uid]['name']}* said: Hi!",
+            parse_mode='Markdown',
+        )
+        
+        # Update the chat interface to show the 'Hi' was sent
+        await cb.message.edit_text(
+            f"💬 *Chat started with {partner_name}*\n\n"
+            "Send your messages below. Tap below to say 'Hi' or end the chat.\n\n"
+            "👋 *You said: Hi!*",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{partner}')],
+                [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
+            ]),
+        )
+        
+        await cb.answer("Hi sent!")
+    except Exception as e:
+        await cb.answer("⚠️ Couldn't send the message. They may have blocked the bot.")
 
 
 @dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
