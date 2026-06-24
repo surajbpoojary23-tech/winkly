@@ -451,12 +451,10 @@ async def h_name(message: types.Message, state: FSMContext):
         ], resize_keyboard=True, one_time_keyboard=True
     )
     msg = await message.answer(
-        "<b>Step 2 of 3</b>\n\n"
-        "\u2696\ufe0f <b>What's your gender?</b>\n\n"
-        "\U0001f49d <b>Who are you interested in?</b>\n\n"
-        "<i>First — select your gender above.</i>",
-        parse_mode='HTML', reply_markup=kb
-    )
+            "<b>Step 2 of 3</b>\n\n"
+            "\u2696\ufe0f <b>What's your gender?</b>",
+            parse_mode='HTML', reply_markup=kb
+        )
     await state.update_data(prev_bot_msg=msg.message_id)
 
 @dp.message(StateFilter(Signup.gender_preferred))
