@@ -467,7 +467,10 @@ async def h_gender_preferred(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     raw = message.text.strip()
-    keyword = raw.lower().lstrip('👨👩⚕🧑👦👧').strip()
+    import re, unicodedata
+    # Fully normalize: decompose emoji, strip variation selectors and ZWJ chars, keep only text
+    normalized = unicodedata.normalize('NFD', raw.lower())
+    keyword = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').strip()
 
     GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
     PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
@@ -1451,7 +1454,10 @@ async def edit_gender_preferred_h(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     raw = message.text.strip()
-    keyword = raw.lower().lstrip('👨👩⚕🧑👦👧').strip()
+    import re, unicodedata
+    # Fully normalize: decompose emoji, strip variation selectors and ZWJ chars, keep only text
+    normalized = unicodedata.normalize('NFD', raw.lower())
+    keyword = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').strip()
 
     GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
     PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
