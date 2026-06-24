@@ -75,7 +75,7 @@ def profile_summary(data: dict) -> str:
     return (
         "✅ *Your Profile*\n\n"
         f"📛  Name:       {data.get('name', '—')}\n"
-        f"🎂  Age / DOB:   {data.get('age', '—')} / {data.get('dob', '—')}\n"
+        f"🎂  Age:        {data.get('age', '—')}\n"
         f"⚧  Gender:     {data.get('gender', '—')}\n"
         f"📝  Bio:        {data.get('bio', '—') or '—'}\n"
         f"❤️  Interested: {data.get('preferred_gender', '—')}\n"
