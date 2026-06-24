@@ -1258,33 +1258,62 @@ async def upgrade_premium(cb: types.CallbackQuery):
         await cb.answer()
         return
     
+    # Premium subscription plans
+    premium_plans = [
+        {"name": "Monthly", "price": 99, "duration": 30, "savings": ""},
+        {"name": "3 Months", "price": 199, "duration": 90, "savings": "Save 37%"},
+        {"name": "6 Months", "price": 399, "duration": 180, "savings": "Save 55%"},
+        {"name": "1 Year", "price": 499, "duration": 365, "savings": "Save 62%"},
+    ]
+    
+    # Create inline keyboard for premium plans
+    plan_keyboard = []
+    for plan in premium_plans:
+        plan_keyboard.append([
+            InlineKeyboardButton(
+                text=f"💎 {plan['name']} - Rs{plan['price']} ({plan['duration']} days){' - ' + plan['savings'] if plan['savings'] else ''}",
+                callback_data=f"select_premium:{plan['name']}:{plan['price']}:{plan['duration']}"
+            )
+        ])
+    
+    plan_keyboard.append([InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')])
+    
+    await cb.message.edit_text(
+        f"💎 *Premium Subscription Plans*\n\n"
+        f"Choose your preferred plan:\n\n"
+        f"✅ Unlimited texts and matches\n"
+        f"✅ Priority matching\n"
+        f"✅ Ad-free experience\n\n"
+        f"*All plans are auto-renewable and can be cancelled anytime*",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=plan_keyboard),
+    )
+    await cb.answer("Select your premium plan:")
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('select_premium:'))
+async def select_premium(cb: types.CallbackQuery):
+    """Handle premium plan selection."""
+    uid = cb.from_user.id
+    parts = cb.data.split(':')
+    plan_name = parts[1]
+    price = int(parts[2])
+    duration = int(parts[3])
+    
     # Generate order ID
     order_id = f"order_{uid}_{int(datetime.now().timestamp())}"
-    amount = PREMIUM_PRICE_INR * 100  # Convert to paise
-    
-    # Create Razorpay order (simulated)
-    order_data = {
-        "id": order_id,
-        "amount": amount,
-        "currency": "INR",
-        "name": "Winkly Premium Subscription",
-        "description": f"Premium subscription for {PREMIUM_DURATION_DAYS} days",
-        "prefill": {
-            "name": user_profiles[uid]['name'] if uid in user_profiles else "User",
-            "email": "user@example.com",
-            "contact": "9876543210"
-        }
-    }
+    amount = price * 100  # Convert to paise
     
     # Send payment details to user
     await cb.message.edit_text(
-        f"💎 *Premium Subscription - Rs{PREMIUM_PRICE_INR}/year*\n\n"
+        f"💎 *Premium Subscription - {plan_name}*\n\n"
+        f"Price: Rs{price} for {duration} days\n\n"
         f"✅ Unlimited texts and matches\n"
         f"✅ Priority matching\n"
         f"✅ Ad-free experience\n\n"
         f"🔗 *Payment Link:* https://checkout.razorpay.com/payment/{order_id}\n\n"
         f"📱 *Scan QR Code:* (Use Razorpay app or website)\n\n"
-        f"⏰ *Valid for:* {PREMIUM_DURATION_DAYS} days\n\n"
+        f"⏰ *Valid for:* {duration} days\n\n"
         "Tap below to proceed with payment:",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
