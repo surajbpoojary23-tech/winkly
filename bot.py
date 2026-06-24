@@ -95,6 +95,72 @@ def _lat_lon(data: dict) -> str:
         return f"{float(lat):.4f}, {float(lon):.4f}"
     return "—"
 
+import math
+
+# ── Matching helpers ───────────────────────────────────────────────────────────
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Straight-line distance in km between two lat/lon points."""
+    R = 6371  # Earth radius in km
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def find_matches(me: dict, all_profiles: dict, radius_km: float = 50) -> list[dict]:
+    """
+    Find mutual matches for 'me'.
+    A match = other user B where:
+      - B's gender is in my preferred_gender list
+      - my gender is in B's preferred_gender list
+      - distance between us <= radius_km
+    Returns sorted by distance (nearest first).
+    """
+    me_lat = float(me['lat'])
+    me_lon = float(me['lon'])
+    my_prefs = me.get('preferred_gender', '')
+    my_gender = me.get('gender', '')
+
+    # Normalise my preferred_gender to a list
+    if my_prefs == 'Everyone':
+        pref_map = {'Men', 'Women', 'Other', 'Male', 'Female'}
+    else:
+        pref_map = {my_prefs}
+
+    matches = []
+    for uid, other in all_profiles.items():
+        if uid == me.get('_uid'):
+            continue
+        if not other.get('lat') or not other.get('lon'):
+            continue
+
+        other_gender = other.get('gender', '')
+        other_prefs  = other.get('preferred_gender', '')
+
+        # Must be in my preferred pool
+        if other_gender not in pref_map:
+            continue
+
+        # Must also be interested in my gender
+        if other_prefs == 'Everyone':
+            interested = True
+        else:
+            interested = my_gender in {other_prefs}
+
+        if not interested:
+            continue
+
+        dist = haversine_km(me_lat, me_lon, float(other['lat']), float(other['lon']))
+        if dist > radius_km:
+            continue
+
+        matches.append({**other, 'uid': uid, 'distance_km': round(dist, 1)})
+
+    matches.sort(key=lambda m: m['distance_km'])
+    return matches
+
 
 def profile_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -582,11 +648,88 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
-    p = user_profiles[uid]
+    me = user_profiles[uid]
+    matches = find_matches({**me, '_uid': uid}, user_profiles)
+
+    if not matches:
+        await cb.message.answer(
+            f"🔎 No matches found near *{me['name']}*.\n"
+            "Try expanding your preferences or waiting for more people nearby.",
+            parse_mode='Markdown',
+        )
+        await cb.answer()
+        return
+
+    # Build match cards — up to 5 at a time
+    cards = matches[:5]
     await cb.message.answer(
-        f"🔎 Looking for matches near *{p['name']}*…\n"
-        f"📍 {_lat_lon(p)}",
+        f"❤️ *{len(matches)} match{'es' if len(matches) != 1 else ''} found!* Nearest to you:\n\n"
+        + "\n\n".join(
+            f"• *{m['name']}*, {m['age']} — 📍 {m['distance_km']} km away"
+            + (f"\n  _{m.get('bio', '')[:80]}_" if m.get('bio') else "")
+            for m in cards
+        ),
         parse_mode='Markdown',
+    )
+
+    # Show first match's profile inline
+    top = cards[0]
+    await cb.message.answer(
+        "👤 *Top Match*\n\n"
+        f"📛  {top.get('name', '—')}\n"
+        f"🎂  Age: {top.get('age', '—')}\n"
+        f"⚧  {top.get('gender', '—')}\n"
+        f"📝  {top.get('bio', '—') or '—'}\n"
+        f"📍  {top.get('distance_km', '?')} km away",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❤️  Show More Matches", callback_data='show_more_matches')],
+            [InlineKeyboardButton(text="🔄  Search Again", callback_data='do_match')],
+        ]),
+    )
+    await cb.answer()
+
+
+# ── Show more matches ──────────────────────────────────────────────────────────
+
+_SHOW_MORE_CACHE: dict = {}
+
+@dp.callback_query(lambda cb: cb.data == 'show_more_matches')
+async def show_more_matches(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    me = user_profiles.get(uid, {})
+    if not me:
+        await cb.answer("⚠️ Profile not found.", show_alert=True)
+        return
+
+    all_matches = find_matches({**me, '_uid': uid}, user_profiles)
+    cached = _SHOW_MORE_CACHE.get(uid, 0)
+    page = [all_matches[cached:cached+3]]
+    _SHOW_MORE_CACHE[uid] = cached + 3
+
+    remaining = len(all_matches) - cached
+    if remaining <= 0:
+        await cb.message.answer("🎉 That's everyone nearby! Check back later.")
+        await cb.answer()
+        return
+
+    batch = all_matches[cached:cached+3]
+    lines = []
+    for m in batch:
+        lines.append(
+            f"• *{m['name']}*, {m['age']} — 📍 {m['distance_km']} km\n"
+            + (f"  _{m.get('bio', '')[:80]}_" if m.get('bio') else "")
+        )
+
+    kb_rows = []
+    if remaining > 3:
+        kb_rows.append([InlineKeyboardButton(text="⬇️  Show More", callback_data='show_more_matches')])
+    kb_rows.append([InlineKeyboardButton(text="🔄  Search Again", callback_data='do_match')])
+
+    await cb.message.answer(
+        f"👥 *More matches* ({remaining} more nearby):\n\n" + "\n\n".join(lines),
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
     )
     await cb.answer()
 
