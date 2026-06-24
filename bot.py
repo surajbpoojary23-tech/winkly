@@ -64,7 +64,10 @@ class Setup(StatesGroup):
 #            "likes": set(), "rejected": set()}}
 user_profiles: dict = {}
 
-# ── Verification sessions ────────────────────────────────────────────────────
+# ── Pending message teasers ───────────────────────────────────────────────────
+# Tracks teaser messages sent to out-of-limit users so we can update the count
+# {receiver_id: {sender_id: {'count': int, 'message_id': int, 'chat_id': int}}}
+_pending_teasers: dict[int, dict[int, dict]] = {}
 # Tracks multi-step verification photo uploads per user
 # {user_id: "awaiting_photo" | "awaiting_selfie"}
 _verify_sessions: dict[int, str] = {}
@@ -1738,6 +1741,8 @@ async def admin_verification_action(cb: types.CallbackQuery):
     if action == 'admin_approve':
         profile['verified'] = True
         profile['verification_status'] = 'approved'
+        if uid in _pending_teasers:
+            del _pending_teasers[uid]
         # Edit caption if message has photo, else edit text
         try:
             if cb.message.photo:
@@ -1975,38 +1980,62 @@ async def relay_message(message: types.Message, state: FSMContext):
                     [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
                 ]),
             )
-        return
-
     # Check if RECEIVER has reached their text limit — send teaser instead of actual message
     partner_profile = user_profiles.get(partner, {})
     if not check_text_limit(partner):
         increment_text_count(uid)  # Sender used one of their texts
-        # Unverified female → verify teaser; male → premium teaser
+
+        # Track pending message count per sender
+        if partner not in _pending_teasers:
+            _pending_teasers[partner] = {}
+        sender_teaser = _pending_teasers[partner].get(uid, {})
+        count = sender_teaser.get('count', 0) + 1
+        _pending_teasers[partner][uid] = {**sender_teaser, 'count': count}
+
+        count_text = f"{count} new message{'s' if count > 1 else ''}"
+
         if partner_profile.get('gender') in ('Women', 'Female') and not partner_profile.get('verified'):
+            teaser_text = f"💬 *{count_text} from {sender_name}*\n\n📸 Verify your profile to read & reply (free & unlimited)."
+            teaser_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_now')],
+            ])
+        else:
+            teaser_text = f"💬 *{count_text} from {sender_name}*\n\n💎 Upgrade to premium to read & reply to all messages!"
+            teaser_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+                [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+            ])
+
+        existing_msg_id = sender_teaser.get('message_id')
+        existing_chat_id = sender_teaser.get('chat_id')
+        if existing_msg_id and existing_chat_id:
             try:
-                await bot.send_message(
-                    partner,
-                    f"💬 *New message from {sender_name}*\n\n"
-                    f"📸 Verify your profile to read & reply to messages (free & unlimited).",
-                    parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_now')],
-                    ]),
-                )
+                await bot.edit_message_text(teaser_text, existing_chat_id, existing_msg_id, parse_mode='Markdown', reply_markup=teaser_kb)
+            except Exception as e:
+                print(f"Teaser edit error: {e}")
+                existing_msg_id = None
+
+        if not existing_msg_id:
+            try:
+                sent = await bot.send_message(partner, teaser_text, parse_mode='Markdown', reply_markup=teaser_kb)
+                _pending_teasers[partner][uid]['message_id'] = sent.message_id
+                _pending_teasers[partner][uid]['chat_id'] = sent.chat.id
             except Exception as e:
                 print(f"Relay teaser error: {e}")
-        else:
+        return
+        existing_chat_id = sender_teaser.get('chat_id')
+        if existing_msg_id and existing_chat_id:
             try:
-                await bot.send_message(
-                    partner,
-                    f"💬 *New message from {sender_name}*\n\n"
-                    f"💎 Upgrade to premium to read & reply to all messages!",
-                    parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
-                        [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
-                    ]),
-                )
+                await bot.edit_message_text(teaser_text, existing_chat_id, existing_msg_id, parse_mode='Markdown', reply_markup=teaser_kb)
+            except Exception as e:
+                print(f"Teaser edit error: {e}")
+                existing_msg_id = None
+
+        if not existing_msg_id:
+            try:
+                sent = await bot.send_message(partner, teaser_text, parse_mode='Markdown', reply_markup=teaser_kb)
+                _pending_teasers[partner][uid]['message_id'] = sent.message_id
+                _pending_teasers[partner][uid]['chat_id'] = sent.chat.id
             except Exception as e:
                 print(f"Relay teaser error: {e}")
         return
@@ -2288,6 +2317,8 @@ async def handle_razorpay_webhook(request: web.Request):
 
             if uid in user_usage:
                 del user_usage[uid]
+            if uid in _pending_teasers:
+                del _pending_teasers[uid]
 
             _processed_payments.add(pid)
             print(f"💎 Premium activated for user {uid}, plan={duration_days}d, until {expiry}")
