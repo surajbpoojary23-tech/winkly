@@ -667,7 +667,7 @@ async def h_profile_photo(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     st = await state.get_state()
-    if st and st.startswith('Signup:'):
+    if st and (st.startswith('Signup:') or st.startswith('EditProfile:')):
         return
     if uid in _verify_pending:
         await h_verify_photo(message)
@@ -1406,6 +1406,7 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     await state.set_state(EditProfile.location)
+    await state.update_data(is_editing=True)
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
@@ -1422,6 +1423,7 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
 async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    await state.set_state(EditProfile.photo)
     await cb.message.edit_text(
         "\u270f\ufe0f <b>Change Photo</b>\n\nSend a new profile photo:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
