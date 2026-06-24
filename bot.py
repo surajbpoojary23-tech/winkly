@@ -97,6 +97,24 @@ def _lat_lon(data: dict) -> str:
 
 import math
 
+# ── Gender normalisation ───────────────────────────────────────────────────────
+
+GENDER_ALIASES = {
+    'male':   'Men',
+    'female': 'Women',
+    'other':  'Other',
+    'men':    'Men',
+    'women':  'Women',
+    'm':      'Men',
+    'f':      'Women',
+}
+
+
+def _norm_gender(g: str) -> str:
+    """Normalise any gender string to 'Men' / 'Women' / 'Other'."""
+    return GENDER_ALIASES.get(g.lower().strip(), g)
+
+
 # ── Matching helpers ───────────────────────────────────────────────────────────
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -113,21 +131,25 @@ def find_matches(me: dict, all_profiles: dict, radius_km: float = 50) -> list[di
     """
     Find mutual matches for 'me'.
     A match = other user B where:
-      - B's gender is in my preferred_gender list
-      - my gender is in B's preferred_gender list
+      - B's gender is in my preferred_gender pool
+      - my gender is in B's preferred_gender pool
       - distance between us <= radius_km
     Returns sorted by distance (nearest first).
     """
     me_lat = float(me['lat'])
     me_lon = float(me['lon'])
-    my_prefs = me.get('preferred_gender', '')
-    my_gender = me.get('gender', '')
+    my_prefs_raw  = me.get('preferred_gender', '')
+    my_gender_raw = me.get('gender', '')
 
-    # Normalise my preferred_gender to a list
+    # Normalise to Men/Women/Other
+    my_gender  = _norm_gender(my_gender_raw)
+    my_prefs   = _norm_gender(my_prefs_raw)
+
+    # Build my preference pool
     if my_prefs == 'Everyone':
-        pref_map = {'Men', 'Women', 'Other', 'Male', 'Female'}
+        pref_pool = {'Men', 'Women', 'Other'}
     else:
-        pref_map = {my_prefs}
+        pref_pool = {my_prefs}
 
     matches = []
     for uid, other in all_profiles.items():
@@ -136,14 +158,14 @@ def find_matches(me: dict, all_profiles: dict, radius_km: float = 50) -> list[di
         if not other.get('lat') or not other.get('lon'):
             continue
 
-        other_gender = other.get('gender', '')
-        other_prefs  = other.get('preferred_gender', '')
+        other_gender = _norm_gender(other.get('gender', ''))
+        other_prefs  = _norm_gender(other.get('preferred_gender', ''))
 
         # Must be in my preferred pool
-        if other_gender not in pref_map:
+        if other_gender not in pref_pool:
             continue
 
-        # Must also be interested in my gender
+        # Must also be interested in my gender (mutual)
         if other_prefs == 'Everyone':
             interested = True
         else:
