@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import BotCommand
 from aiogram.filters.state import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -360,6 +361,13 @@ async def cmd_start(message: types.Message, state: FSMContext):
     uid = message.from_user.id
 
     if uid in user_profiles:
+        # Remove any lingering keyboard (from location step)
+        try:
+            remove_msg = await message.answer(".", reply_markup=ReplyKeyboardRemove())
+            await safe_delete_msg(message.chat.id, remove_msg.message_id)
+        except:
+            pass
+        
         await message.answer(
             f"👋 Hey again, *{user_profiles[uid]['name']}*!\n\n"
             "Your profile is ready. Want to find someone?",
@@ -933,6 +941,13 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         user_profiles[uid] = merged
         await state.clear()
 
+        # Remove location keyboard
+        try:
+            remove_msg = await bot.send_message(chat_id, ".", reply_markup=ReplyKeyboardRemove())
+            await safe_delete_msg(chat_id, remove_msg.message_id)
+        except:
+            pass
+        
         await bot.send_message(
             chat_id,
             "🎉 *Profile complete!*\n\n" + profile_summary(merged) +
@@ -1279,6 +1294,13 @@ async def start_chat(cb: types.CallbackQuery):
 
     current_chat[uid] = partner
     current_chat[partner] = uid  # Bidirectional
+
+    # Remove any lingering location keyboard
+    try:
+        remove_msg = await bot.send_message(uid, ".", reply_markup=ReplyKeyboardRemove())
+        await safe_delete_msg(uid, remove_msg.message_id)
+    except:
+        pass
 
     partner_name = user_profiles[partner]['name']
     await cb.message.edit_text(
@@ -2118,6 +2140,23 @@ async def cmd_stop(message: types.Message):
         )
 
 
+
+@dp.message(Command('find'))
+async def cmd_find(message: types.Message):
+    """Start finding matches."""
+    uid = message.from_user.id
+    if uid not in user_profiles:
+        await message.answer("📝 Set up your profile first with /start.")
+        return
+    # Simulate do_match by sending a message with the callback
+    await message.answer(
+        "❤️ Looking for matches?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❤️  Find Matches Now", callback_data='do_match')],
+        ])
+    )
+
+
 # ── /profile command (show current profile) ───────────────────────────────────
 # ── Profile command ──
 @dp.message(Command('profile'))
@@ -2314,6 +2353,24 @@ async def auto_setup_razorpay_webhook():
 
 async def on_startup(dispatcher: Dispatcher):
     print("🚀 on_startup called, WEBHOOK_URL =", WEBHOOK_URL)
+    
+    # Register bot commands for the menu button (next to input field)
+    commands = [
+        BotCommand(command="start", description="🏠 Start / Restart"),
+        BotCommand(command="profile", description="👤 View my profile"),
+        BotCommand(command="find", description="❤️ Find matches"),
+        BotCommand(command="chat", description="💬 My matches"),
+        BotCommand(command="verify", description="🏅 Get verified badge"),
+        BotCommand(command="premium", description="💎 Premium plans"),
+        BotCommand(command="stop", description="🔚 End current chat"),
+        BotCommand(command="cancel", description="❌ Cancel setup"),
+    ]
+    try:
+        await bot.set_my_commands(commands)
+        print("✅ Bot commands registered")
+    except Exception as e:
+        print(f"⚠️ Failed to set commands: {e}")
+    
     if WEBHOOK_URL:
         await bot.set_webhook(WEBHOOK_URL)
         print(f"Webhook set to {WEBHOOK_URL}")
