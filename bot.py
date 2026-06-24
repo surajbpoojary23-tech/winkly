@@ -972,11 +972,10 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
     search_msg = await cb.message.answer(
         f"🔍 *{me['name']}*, searching for someone compatible...\n\n"
         "Looking for someone who matches your preferences (gender + location).\n"
-        "This usually takes 5-30 seconds. You can tap 'Skip' to cancel.\n\n"
+        "This usually takes 5-30 seconds.\n\n"
         "⏳ *Waiting in queue...*",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌  Skip", callback_data='skip_waiting')],
         ]),
     )
     
@@ -1059,28 +1058,7 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@dp.callback_query(lambda cb: cb.data == 'skip_waiting')
-async def skip_waiting(cb: types.CallbackQuery):
-    """Skip the waiting queue and return to profile."""
-    uid = cb.from_user.id
-    
-    if uid in waiting_queue:
-        del waiting_queue[uid]
-        if uid in user_profiles:
-            await cb.message.answer(
-                "❌ *Search cancelled.*\n\n"
-                "You can tap 'Find Matches' again to start searching.\n"
-                "Your profile is saved and ready.",
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-                    [InlineKeyboardButton(text="👤  View Profile", callback_data='back_to_profile')],
-                ]),
-            )
-        else:
-            await cb.message.answer("❌ Search cancelled.")
-    else:
-        await cb.answer("Not currently waiting.")
+
 
 
 async def _show_next_match(message, uid: int, idx: int):
