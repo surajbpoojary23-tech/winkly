@@ -62,14 +62,28 @@ async def get_redis():
     global _redis
     if _redis is None:
         if REDIS_URL:
-            _redis = redis.from_url(REDIS_URL, decode_responses=True)
+            try:
+                _redis = redis.from_url(REDIS_URL, decode_responses=True)
+                # Test connection
+                await _redis.ping()
+            except Exception as e:
+                logger.warning(f"Redis unavailable: {e}. Running in-memory only.")
+                _redis = None
         else:
-            _redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
+            try:
+                _redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
+                await _redis.ping()
+            except Exception:
+                logger.warning("Local Redis not available. Running in-memory only.")
+                _redis = None
     return _redis
 
 async def init_storage():
     global user_profiles, active_matches, likes_sent, waiting_queue, user_usage, premium_subscriptions, current_chat
     r = await get_redis()
+    if r is None:
+        logger.info("Storage: in-memory only (Redis unavailable)")
+        return
     for key, dest in [
         ('winkly:profiles',  user_profiles),
         ('winkly:matches',   active_matches),
@@ -98,14 +112,19 @@ async def init_storage():
 
 async def save_all():
     r = await get_redis()
-    await r.set('winkly:profiles',  json.dumps(user_profiles))
-    await r.set('winkly:matches',   json.dumps(active_matches))
-    await r.set('winkly:queue',     json.dumps(waiting_queue))
-    await r.set('winkly:usage',     json.dumps(user_usage))
-    await r.set('winkly:premium',   json.dumps(premium_subscriptions))
-    await r.set('winkly:chat',      json.dumps(current_chat))
-    await r.set('winkly:likes',     json.dumps({k: list(v) for k, v in likes_sent.items()}))
-    await r.set('winkly:processed', json.dumps(list(_processed_payments)))
+    if r is None:
+        return  # In-memory only, nothing to persist
+    try:
+        await r.set('winkly:profiles',  json.dumps(user_profiles))
+        await r.set('winkly:matches',   json.dumps(active_matches))
+        await r.set('winkly:queue',     json.dumps(waiting_queue))
+        await r.set('winkly:usage',     json.dumps(user_usage))
+        await r.set('winkly:premium',   json.dumps(premium_subscriptions))
+        await r.set('winkly:chat',      json.dumps(current_chat))
+        await r.set('winkly:likes',     json.dumps({k: list(v) for k, v in likes_sent.items()}))
+        await r.set('winkly:processed', json.dumps(list(_processed_payments)))
+    except Exception as e:
+        logger.warning(f"Redis save failed: {e}")
 
 user_profiles: Dict[int, dict] = {}
 active_matches: Dict[int, Dict[int, dict]] = {}
@@ -1517,9 +1536,13 @@ async def handle_razorpay_webhook(request):
                 del user_usage[uid]
             _processed_payments.add(payment_id)
             r = await get_redis()
-            await r.set('winkly:premium', json.dumps(premium_subscriptions))
-            await r.set('winkly:usage', json.dumps(user_usage))
-            await r.set('winkly:processed', json.dumps(list(_processed_payments)))
+            if r:
+                try:
+                    await r.set('winkly:premium', json.dumps(premium_subscriptions))
+                    await r.set('winkly:usage', json.dumps(user_usage))
+                    await r.set('winkly:processed', json.dumps(list(_processed_payments)))
+                except Exception as e:
+                    logger.warning(f"Webhook Redis save failed: {e}")
             logger.info(f"Premium activated for {uid}, plan={dur}d, until {exp}")
             try:
                 await bot.send_message(
