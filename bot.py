@@ -2357,13 +2357,11 @@ async def on_startup(dispatcher: Dispatcher):
     # Register bot commands for the menu button (next to input field)
     commands = [
         BotCommand(command="start", description="🏠 Start / Restart"),
+        BotCommand(command="stop", description="🔚 End current chat"),
         BotCommand(command="profile", description="👤 View my profile"),
         BotCommand(command="find", description="❤️ Find matches"),
-        BotCommand(command="chat", description="💬 My matches"),
         BotCommand(command="verify", description="🏅 Get verified badge"),
         BotCommand(command="premium", description="💎 Premium plans"),
-        BotCommand(command="stop", description="🔚 End current chat"),
-        BotCommand(command="cancel", description="❌ Cancel setup"),
     ]
     try:
         await bot.set_my_commands(commands)
