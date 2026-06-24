@@ -135,6 +135,13 @@ def _lat_lon(data: dict) -> str:
 import math
 from datetime import datetime, timedelta
 
+async def safe_delete_msg(chat_id: int, msg_id: int | None):
+    if msg_id:
+        try:
+            await bot.delete_message(chat_id, msg_id)
+        except:
+            pass
+
 # ── Usage tracking helpers ───────────────────────────────────────────────────
 
 def is_premium_user(uid: int) -> bool:
@@ -348,7 +355,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
     # New user — start profile setup immediately
     await state.set_state(Setup.name)
-    await message.answer(
+    msg = await message.answer(
         "👋 Hey! I'm *Winkly*.\n\n"
         "I'll help you find people nearby. Let's set up your profile — "
         "it only takes ~30 seconds.\n\n"
@@ -356,6 +363,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "📛 *What's your name?*",
         parse_mode='Markdown',
     )
+    await state.update_data(last_bot_msg_id=msg.message_id)
 
 
 # ── /cancel ───────────────────────────────────────────────────────────────────
@@ -431,6 +439,7 @@ async def retake(cb: types.CallbackQuery, state: FSMContext):
         parse_mode='Markdown',
     )
     await state.set_state(Setup.name)
+    await state.update_data(last_bot_msg_id=cb.message.message_id)
     await cb.answer()
 
 
@@ -466,13 +475,14 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Setup.name))
 async def handle_name(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     try:
         name = message.text.strip()
         if len(name) < 2:
             await message.answer("⚠️ Name must be at least 2 characters. Please enter a longer name:")
             return
         await state.update_data(name=name)
-        await message.answer(f"📛 *{name}* — got it!")
 
         data = await state.get_data()
         if data.get('edit_mode'):
@@ -550,6 +560,8 @@ def calc_age(born: date) -> int:
 
 @dp.message(StateFilter(Setup.age))
 async def handle_dob(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     raw = message.text.strip()
     dob = parse_dob(raw)
     if dob is None:
@@ -568,7 +580,6 @@ async def handle_dob(message: types.Message, state: FSMContext):
         await message.answer("⚠️ You must be at least 18 and no older than 100. Please enter a valid age:")
         return
     await state.update_data(age=str(age), dob=str(dob))
-    await message.answer(f"🎂 *{age}* years old — perfect!")
 
     data = await state.get_data()
     if data.get('edit_mode'):
@@ -582,8 +593,9 @@ async def handle_dob(message: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(Setup.gender))
 async def handle_gender(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     raw = message.text.strip().lower()
-    # Try exact match first (full button text like "👨 male"), then fall back to individual emoji
     exact_map = {
         '👨 male': 'Male', '👩 female': 'Female', '⚧ other': 'Other',
     }
@@ -602,7 +614,6 @@ async def handle_gender(message: types.Message, state: FSMContext):
         )
         return
     await state.update_data(gender=gender)
-    await message.answer(f"⚧ *{gender}* — noted!", reply_markup=ReplyKeyboardRemove())
 
     data = await state.get_data()
     if data.get('edit_mode'):
@@ -614,6 +625,7 @@ async def handle_gender(message: types.Message, state: FSMContext):
 
 @dp.callback_query(lambda cb: cb.data.startswith('gender_'), StateFilter(Setup.gender))
 async def handle_gender_btn(cb: types.CallbackQuery, state: FSMContext):
+    await safe_delete_msg(cb.message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
     raw = cb.data.replace('gender_', '').lower()
     gender_map = {'male': 'Male', 'female': 'Female', 'other': 'Other', 'm': 'Male', 'f': 'Female'}
     gender = gender_map.get(raw, raw.title())
@@ -632,12 +644,12 @@ async def handle_gender_btn(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Setup.bio))
 async def handle_bio(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     raw = message.text.strip()
-    
-    # Allow /skip or "skip" as text command
+
     if raw.lower() in ('/skip', 'skip'):
         await state.update_data(bio="")
-        await message.answer("📝 *Bio skipped.*")
         data = await state.get_data()
         if data.get('edit_mode'):
             await state.update_data(edit_mode=False)
@@ -645,12 +657,11 @@ async def handle_bio(message: types.Message, state: FSMContext):
         else:
             await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
         return
-    
+
     if len(raw) < 10:
         await message.answer("⚠️ Please write at least a sentence or two about yourself (or type /skip to skip):")
         return
     await state.update_data(bio=raw)
-    await message.answer("📝 *Bio saved!*")
 
     data = await state.get_data()
     if data.get('edit_mode'):
@@ -662,6 +673,7 @@ async def handle_bio(message: types.Message, state: FSMContext):
 
 @dp.callback_query(lambda cb: cb.data == 'skip_bio', StateFilter(Setup.bio))
 async def skip_bio(cb: types.CallbackQuery, state: FSMContext):
+    await safe_delete_msg(cb.message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
     await state.update_data(bio="")
     await cb.message.edit_text("📝 *Bio skipped.*")
     await cb.answer()
@@ -678,6 +690,8 @@ async def skip_bio(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Setup.preferred_gender))
 async def handle_preferred_gender(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     raw = message.text.strip().lower()
     exact_map = {
         '👨 men': 'Men', '👩 women': 'Women', '👥 everyone': 'Everyone',
@@ -701,10 +715,6 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
         )
         return
     await state.update_data(preferred_gender=pref)
-    await message.answer(
-        f"❤️ *{pref}* — noted!",
-        reply_markup=ReplyKeyboardRemove(),
-    )
 
     data = await state.get_data()
     if data.get('edit_mode'):
@@ -757,21 +767,16 @@ async def geocode_place(place_name: str):
 
 @dp.message(lambda m: not m.location, StateFilter(Setup.location))
 async def handle_location_text(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     text = message.text.strip()
-    
-    # Try to geocode the place name
+
     lat, lon = await geocode_place(text)
     if lat and lon:
         await state.update_data(lat=str(lat), lon=str(lon))
-        await message.answer(
-            f"📍 *Location found!*\n_{lat:.5f}, {lon:.5f}_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode='Markdown',
-        )
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
         return
 
-    # If geocoding fails, show options with helpful suggestions
     await message.answer(
         "📍 Couldn't find that place. Try again, or use the buttons below:\n\n"
         "💡 *Tip:* Try common city names like 'Bangalore', 'Mumbai', 'Delhi', 'Chennai', or use 'Share My Location' for GPS.\n\n"
@@ -788,26 +793,24 @@ async def handle_location_text(message: types.Message, state: FSMContext):
 
 @dp.message(lambda m: m.location, StateFilter(Setup.location))
 async def handle_location_ok(message: types.Message, state: FSMContext):
+    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, message.message_id)
     loc = message.location
     await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude))
-    await message.answer(
-        f"📍 *Location saved!*\n_{loc.latitude:.5f}, {loc.longitude:.5f}_",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode='Markdown',
-    )
     await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
 
 
 # ── Confirm / review screen ─────────────────────────────────────────────────────
 
 async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id: int):
-    """Set next state and send the appropriate prompt."""
+    """Set next state, send the appropriate prompt, and save its message_id."""
     await state.set_state(next_state)
     step = next_state.state.split(':')[-1]
+    msg = None
 
     if step == 'age':
         idx = 1
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "🎂 *When were you born?*\n_(DD / MM / YYYY — e.g. 15 / 08 / 1995)_",
@@ -815,7 +818,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         )
     elif step == 'gender':
         idx = 2
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "⚧ *What's your gender?*",
@@ -831,7 +834,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         )
     elif step == 'bio':
         idx = 3
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "📝 *Tell us a bit about yourself*\n"
@@ -845,7 +848,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         )
     elif step == 'preferred_gender':
         idx = 4
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "❤️ *Who are you interested in?*",
@@ -861,7 +864,7 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         )
     elif step == 'location':
         idx = 5
-        await bot.send_message(
+        msg = await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
             "📍 *Share your location* or type a place name (city, area):",
@@ -877,7 +880,6 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
     elif step == 'confirm':
         new_data = await state.get_data()
         uid  = user_id
-        # Merge: existing profile fields stay, new data (edit_mode stripped) overrides
         existing = user_profiles.get(uid, {})
         merged = _clean({**existing, **new_data})
         user_profiles[uid] = merged
@@ -890,6 +892,10 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
             parse_mode='Markdown',
             reply_markup=profile_kb(),
         )
+        return
+
+    if msg:
+        await state.update_data(last_bot_msg_id=msg.message_id)
 
 
 # ── Review screen interactions ─────────────────────────────────────────────────
