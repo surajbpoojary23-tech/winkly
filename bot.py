@@ -21,7 +21,6 @@ import redis.asyncio as redis
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import S
 from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from aiogram.filters.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
