@@ -97,8 +97,8 @@ async def init_storage():
         if raw:
             try:
                 val = json.loads(raw)
-                if key in ('winkly:matches', 'winkly:queue', 'winkly:chat'):
-                    val = {int(k): v for k, v in val.items()}
+                # All dicts use integer uid keys — convert from Redis string keys
+                val = {int(k): v for k, v in val.items()}
                 dest.update(val)
             except Exception as e:
                 logger.error(f"Failed to load {key}: {e}")
@@ -154,8 +154,8 @@ class EditProfile(StatesGroup):
     photo = State()
 
 GENDER_NORM = {'male':'Men','female':'Women','other':'Other','men':'Men','women':'Women','m':'Men','f':'Women',
-               '\u1f468\u200d\U0001f3fb':'Men','\u0001f469\u200d\U0001f3fb':'Women','\u2695\ufe0f':'Other',
-               '\u1f468 Men':'Men','\u0001f469 Women':'Women','\u0001f465 Everyone':'Everyone',
+               '\U0001f468\u200d\U0001f3fb':'Men','\U0001f469\u200d\U0001f3fb':'Women','\u2695\ufe0f':'Other',
+               '\U0001f468 Men':'Men','\U0001f469 Women':'Women','\U0001f465 Everyone':'Everyone',
                '\U0001f468\u200d\U0001f3eb':'Men','\U0001f469\u200d\U0001f3fb':'Women','\U0001f465':'Everyone'}
 
 def norm_gender(g: str) -> str:
@@ -267,19 +267,26 @@ def is_premium(uid: int) -> bool:
     try: return datetime.now() < datetime.fromisoformat(exp_str)
     except: return False
 
+def is_verified_female(uid: int) -> bool:
+    """Verified females get unlimited free access (bypass daily limits)."""
+    p = user_profiles.get(uid)
+    return bool(p and p.get('verified') and p.get('gender') in ('Women', 'Female'))
+
 def check_text_quota(uid: int) -> bool:
-    _reset_daily(uid); return is_premium(uid) or user_usage[uid]['texts'] < DAILY_TEXT_LIMIT
+    _reset_daily(uid); return is_premium(uid) or is_verified_female(uid) or user_usage[uid]['texts'] < DAILY_TEXT_LIMIT
 
 def check_match_quota(uid: int) -> bool:
-    _reset_daily(uid); return is_premium(uid) or user_usage[uid]['matches'] < DAILY_MATCH_LIMIT
+    _reset_daily(uid); return is_premium(uid) or is_verified_female(uid) or user_usage[uid]['matches'] < DAILY_MATCH_LIMIT
 
 def consume_text(uid: int):
     _reset_daily(uid)
-    if not is_premium(uid): user_usage[uid]['texts'] = user_usage[uid].get('texts', 0) + 1
+    if not is_premium(uid) and not is_verified_female(uid):
+        user_usage[uid]['texts'] = user_usage[uid].get('texts', 0) + 1
 
 def consume_match(uid: int):
     _reset_daily(uid)
-    if not is_premium(uid): user_usage[uid]['matches'] = user_usage[uid].get('matches', 0) + 1
+    if not is_premium(uid) and not is_verified_female(uid):
+        user_usage[uid]['matches'] = user_usage[uid].get('matches', 0) + 1
 
 def quota_summary(uid: int) -> str:
     if is_premium(uid):
@@ -288,6 +295,8 @@ def quota_summary(uid: int) -> str:
             exp = datetime.fromisoformat(exp_str); days = (exp - datetime.now()).days
             return f"PREMIUM ACTIVE - Unlimited! Expires in {days} day{'s' if days != 1 else ''}"
         except: return "PREMIUM ACTIVE - Unlimited!"
+    if is_verified_female(uid):
+        return "VERIFIED FEMALE - Unlimited free access!"
     _reset_daily(uid)
     u = user_usage.get(uid, {'texts': 0, 'matches': 0})
     tl = max(0, DAILY_TEXT_LIMIT - u.get('texts', 0))
@@ -322,7 +331,7 @@ async def credit_referrer(ref_code: str, new_uid: int):
             try:
                 r = await get_redis(); await r.sadd(f'winkly:referrals:{uid}', new_uid)
             except: pass
-            cnt = await referral_count(uid) + 1
+            cnt = await referral_count(uid)
             logger.info(f"Referrer {uid} has {cnt} referrals")
             if cnt >= 3: await award_free_premium(uid)
             return
@@ -432,7 +441,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "\u1f44b Hey! I'm <b>Winkly</b>. I'll help you find people nearby.\n\n"
         "Let's set up your profile — it only takes ~30 seconds.\n\n"
-        "<b>Step 1 of 3</b>\n\n"
+        "<b>Step 1 of 4</b>\n\n"
         "\U0001f464 <b>What's your name?</b>",
         parse_mode='HTML'
     )
@@ -472,7 +481,7 @@ async def h_gender(message: types.Message, state: FSMContext):
     raw = message.text.strip()
     nfd = unicodedata.normalize('NFD', raw.lower())
     keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
-    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
+    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Female', 'other': 'Other'}
     if keyword not in GENDER_KW:
         kb = ReplyKeyboardMarkup(
             keyboard=[
@@ -1466,7 +1475,7 @@ async def edit_gender_h(message: types.Message, state: FSMContext):
     raw = message.text.strip()
     nfd = unicodedata.normalize('NFD', raw.lower())
     keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
-    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
+    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Female', 'other': 'Other'}
     if keyword not in GENDER_KW:
         kb = ReplyKeyboardMarkup(
             keyboard=[
