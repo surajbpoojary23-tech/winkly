@@ -1,5 +1,9 @@
 import os
 import asyncio
+import hashlib
+import hmac
+import json
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.filters.state import StateFilter
@@ -21,6 +25,13 @@ from aiohttp import web
 BOT_TOKEN = os.getenv('BOT_TOKEN') or "8624196108:***"
 REDIS_URL  = os.getenv('REDIS_URL')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL') or 'https://winkly-kmsz.onrender.com'
+
+# Razorpay configuration
+RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID')
+RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET')
+RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET')
+PREMIUM_PRICE_INR = 399  # Rs399 per year
+PREMIUM_DURATION_DAYS = 365
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -50,6 +61,12 @@ likes_sent: dict[int, set] = {}
 active_matches: dict[int, dict[int, dict]] = {}
 # current_chat: {user_id: partner_id} — tracks who each user is chatting with
 current_chat: dict[int, int] = {}
+
+# ── Usage tracking for free vs premium ───────────────────────────────────────
+# text_usage: {user_id: {'texts_sent': int, 'match_count': int, 'last_reset': timestamp}}
+user_usage: dict[int, dict] = {}
+# premium_subscriptions: {user_id: {'expiry_date': timestamp}}
+premium_subscriptions: dict[int, dict] = {}
 
 # ── Omegle-style waiting queue ───────────────────────────────────────────────
 # users waiting for a match: {user_id: {'added_at': timestamp, 'message_id': int}}
@@ -110,6 +127,77 @@ def _lat_lon(data: dict) -> str:
     return "—"
 
 import math
+from datetime import datetime, timedelta
+
+# ── Usage tracking helpers ───────────────────────────────────────────────────
+
+def is_premium_user(uid: int) -> bool:
+    """Check if user has an active premium subscription."""
+    if uid not in premium_subscriptions:
+        return False
+    expiry = premium_subscriptions[uid].get('expiry_date')
+    if not expiry:
+        return False
+    return datetime.now() < expiry
+
+
+def get_user_usage(uid: int) -> dict:
+    """Get or initialize user usage data."""
+    if uid not in user_usage:
+        user_usage[uid] = {
+            'texts_sent': 0,
+            'match_count': 0,
+            'last_reset': datetime.now(),
+        }
+    return user_usage[uid]
+
+
+def check_text_limit(uid: int) -> bool:
+    """Check if user has reached text limit (10 per match)."""
+    if is_premium_user(uid):
+        return True
+    
+    usage = get_user_usage(uid)
+    return usage['texts_sent'] < 10
+
+
+def check_match_limit(uid: int) -> bool:
+    """Check if user has reached match limit (10 total)."""
+    if is_premium_user(uid):
+        return True
+    
+    usage = get_user_usage(uid)
+    return usage['match_count'] < 10
+
+
+def increment_text_count(uid: int):
+    """Increment text count for user."""
+    if not is_premium_user(uid):
+        usage = get_user_usage(uid)
+        usage['texts_sent'] += 1
+
+
+def increment_match_count(uid: int):
+    """Increment match count for user."""
+    if not is_premium_user(uid):
+        usage = get_user_usage(uid)
+        usage['match_count'] += 1
+
+
+def get_usage_summary(uid: int) -> str:
+    """Get formatted usage summary for user."""
+    if is_premium_user(uid):
+        expiry = premium_subscriptions[uid].get('expiry_date')
+        if expiry:
+            days_left = (expiry - datetime.now()).days
+            return f"💎 *Premium* - Unlimited texts and matches\nExpires in {days_left} days"
+        return "💎 *Premium* - Unlimited texts and matches"
+    
+    usage = get_user_usage(uid)
+    texts_left = max(0, 10 - usage['texts_sent'])
+    matches_left = max(0, 10 - usage['match_count'])
+    return f"📝 *Free* - {texts_left} texts left per match, {matches_left} matches left total\n💰 Upgrade for unlimited access (Rs399/year)"
+
 
 # ── Gender normalisation ───────────────────────────────────────────────────────
 
@@ -821,52 +909,56 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
         partner = waiting_match['uid']
         partner_name = waiting_match['name']
         
-        # Create mutual match
-        if uid not in active_matches:
-            active_matches[uid] = {}
-        if partner not in active_matches:
-            active_matches[partner] = {}
-        
-        active_matches[uid][partner] = {'status': 'matched'}
-        active_matches[partner][uid] = {'status': 'matched'}
-        
-        # Remove from waiting queue
-        if uid in waiting_queue:
-            del waiting_queue[uid]
-        if partner in waiting_queue:
-            del waiting_queue[partner]
-        
-        # Notify both users of instant match
-        await bot.send_message(
-            uid,
-            f"🎉 *It's a Match!*\n\n"
-            f"You and *{partner_name}* are compatible!\n\n"
-            f"📛  {partner_name}\n"
-            f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
-            f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
-            "Tap below to start chatting:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
-            ]),
-        )
-        
-        await bot.send_message(
-            partner,
-            f"🎉 *It's a Match!*\n\n"
-            f"You and *{me['name']}* are compatible!\n\n"
-            f"📛  {me['name']}\n"
-            f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
-            f"📝  {me.get('bio', '') or '—'}\n\n"
-            "Tap below to start chatting:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
-            ]),
-        )
-        
-        await cb.answer()
-        return
+    # Create mutual match
+    if uid not in active_matches:
+        active_matches[uid] = {}
+    if partner not in active_matches:
+        active_matches[partner] = {}
+    
+    active_matches[uid][partner] = {'status': 'matched'}
+    active_matches[partner][uid] = {'status': 'matched'}
+    
+    # Increment match count for both users
+    increment_match_count(uid)
+    increment_match_count(partner)
+    
+    # Remove from waiting queue
+    if uid in waiting_queue:
+        del waiting_queue[uid]
+    if partner in waiting_queue:
+        del waiting_queue[partner]
+    
+    # Notify both users of instant match
+    await bot.send_message(
+        uid,
+        f"🎉 *It's a Match!*\n\n"
+        f"You and *{partner_name}* are compatible!\n\n"
+        f"📛  {partner_name}\n"
+        f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
+        f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
+        "Tap below to start chatting:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
+        ]),
+    )
+    
+    await bot.send_message(
+        partner,
+        f"🎉 *It's a Match!*\n\n"
+        f"You and *{me['name']}* are compatible!\n\n"
+        f"📛  {me['name']}\n"
+        f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
+        f"📝  {me.get('bio', '') or '—'}\n\n"
+        "Tap below to start chatting:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
+        ]),
+    )
+    
+    await cb.answer()
+    return
     
     # No instant match - add to waiting queue
     import time
@@ -911,6 +1003,10 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
             
             active_matches[uid][partner] = {'status': 'matched'}
             active_matches[partner][uid] = {'status': 'matched'}
+            
+            # Increment match count for both users
+            increment_match_count(uid)
+            increment_match_count(partner)
             
             # Remove from waiting queue
             if uid in waiting_queue:
@@ -1176,6 +1272,123 @@ async def end_chat_handler(cb: types.CallbackQuery):
     await cb.answer()
 
 
+@dp.callback_query(lambda cb: cb.data == 'upgrade_premium')
+async def upgrade_premium(cb: types.CallbackQuery):
+    """Handle premium upgrade request."""
+    uid = cb.from_user.id
+    
+    if is_premium_user(uid):
+        await cb.message.edit_text(
+            "💎 *Already Premium!*\n\n"
+            "You already have an active premium subscription.\n\n"
+            "Tap below to find matches:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+            ]),
+        )
+        await cb.answer()
+        return
+    
+    # Generate order ID
+    order_id = f"order_{uid}_{int(datetime.now().timestamp())}"
+    amount = PREMIUM_PRICE_INR * 100  # Convert to paise
+    
+    # Create Razorpay order (simulated)
+    order_data = {
+        "id": order_id,
+        "amount": amount,
+        "currency": "INR",
+        "name": "Winkly Premium Subscription",
+        "description": f"Premium subscription for {PREMIUM_DURATION_DAYS} days",
+        "prefill": {
+            "name": user_profiles[uid]['name'] if uid in user_profiles else "User",
+            "email": "user@example.com",
+            "contact": "9876543210"
+        }
+    }
+    
+    # Send payment details to user
+    await cb.message.edit_text(
+        f"💎 *Premium Subscription - Rs{PREMIUM_PRICE_INR}/year*\n\n"
+        f"✅ Unlimited texts and matches\n"
+        f"✅ Priority matching\n"
+        f"✅ Ad-free experience\n\n"
+        f"🔗 *Payment Link:* https://checkout.razorpay.com/payment/{order_id}\n\n"
+        f"📱 *Scan QR Code:* (Use Razorpay app or website)\n\n"
+        f"⏰ *Valid for:* {PREMIUM_DURATION_DAYS} days\n\n"
+        "Tap below to proceed with payment:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Pay Now", url=f"https://checkout.razorpay.com/payment/{order_id}")],
+            [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+        ]),
+    )
+    await cb.answer("Payment initiated! Complete payment to activate premium.")
+
+
+@dp.message(Command('premium'))
+async def cmd_premium(message: types.Message):
+    """Show premium subscription information."""
+    uid = message.from_user.id
+    
+    if uid not in user_profiles:
+        await message.answer("📝 You haven't set up a profile yet.\n\nSend /start to begin!")
+        return
+    
+    if is_premium_user(uid):
+        expiry = premium_subscriptions[uid].get('expiry_date')
+        if expiry:
+            days_left = (expiry - datetime.now()).days
+            status = f"Active until {expiry.strftime('%Y-%m-%d')}\n{days_left} days remaining"
+        else:
+            status = "Active (no expiry date set)"
+        
+        await message.answer(
+            f"💎 *Premium Subscription Status*\n\n"
+            f"{status}\n\n"
+            f"You have unlimited texts and matches!\n\n"
+            f"Tap below to find matches:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+            ]),
+        )
+    else:
+        await message.answer(
+            f"💎 *Premium Subscription*\n\n"
+            f"Upgrade to premium for Rs{PREMIUM_PRICE_INR}/year and enjoy:\n\n"
+            f"✅ Unlimited texts and matches\n"
+            f"✅ Priority matching\n"
+            f"✅ Ad-free experience\n\n"
+            f"Your current usage:\n"
+            f"{get_usage_summary(uid)}",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Upgrade to Premium", callback_data='upgrade_premium')],
+                [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+            ]),
+        )
+
+
+@dp.callback_query(lambda cb: cb.data == 'back_to_profile')
+async def back_to_profile(cb: types.CallbackQuery, state: FSMContext):
+    """Navigate back to profile view."""
+    uid = cb.from_user.id
+    
+    if uid not in user_profiles:
+        await cb.message.answer("📝 You haven't set up a profile yet.\n\nSend /start to begin!")
+        return
+    
+    data = user_profiles[uid]
+    await cb.message.edit_text(
+        profile_summary(data) + "\n_Use the buttons below to edit any field._",
+        parse_mode='Markdown',
+        reply_markup=profile_kb(),
+    )
+    await cb.answer()
+
+
 @dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
 async def end_chat_handler(cb: types.CallbackQuery):
     uid = cb.from_user.id
@@ -1211,9 +1424,24 @@ async def relay_message(message: types.Message, state: FSMContext):
     partner = current_chat[uid]
     partner_name = user_profiles.get(partner, {}).get('name', 'Someone')
 
+    # Check text limit for free users
+    if not check_text_limit(uid):
+        await message.answer(
+            "⚠️ You've reached your daily limit of 10 texts per match.\n\n"
+            "💰 Upgrade to premium for unlimited texts (Rs399/year)\n"
+            "Tap below to upgrade:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Upgrade to Premium", callback_data='upgrade_premium')],
+                [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+            ]),
+        )
+        return
+
     try:
         # Copy the full message (preserves formatting, photos, etc.)
         await bot.copy_message(partner, message.chat.id, message.message_id)
+        increment_text_count(uid)
         # Optional: show delivered checkmark
         # await message.react([types.ReactionTypeEmoji(emoji='✅')])
     except Exception as e:
@@ -1403,6 +1631,144 @@ async def on_startup(dispatcher: Dispatcher):
         site = web.TCPSite(runner, host='0.0.0.0', port=port)
         await site.start()
         print(f'✅ Webhook server running on port {port}')
+        await asyncio.Event().wait()
+    else:
+        print('No WEBHOOK_URL – long‑polling mode')
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot, skip_updates=False)
+
+
+@dp.callback_query(lambda cb: cb.data == 'upgrade_premium')
+async def upgrade_premium(cb: types.CallbackQuery):
+    """Handle premium upgrade request."""
+    uid = cb.from_user.id
+    
+    # Set premium subscription (Rs399/year)
+    expiry = datetime.now() + timedelta(days=365)
+    premium_subscriptions[uid] = {'expiry_date': expiry}
+    
+    # Clear usage limits
+    if uid in user_usage:
+        del user_usage[uid]
+    
+    await cb.message.edit_text(
+        "💎 *Premium Activated!*\n\n"
+        "You now have unlimited texts and matches!\n\n"
+        "Tap below to find your first match:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+        ]),
+    )
+    await cb.answer("Premium activated! Enjoy unlimited access!")
+
+
+# ── Razorpay webhook handler ───────────────────────────────────────────────
+
+async def handle_razorpay_webhook(request: web.Request):
+    """Handle Razorpay payment webhook."""
+    try:
+        # Get webhook secret from environment
+        webhook_secret = RAZORPAY_WEBHOOK_SECRET
+        if not webhook_secret:
+            return web.Response(status=400, text="Webhook secret not configured")
+        
+        # Get signature from headers
+        signature = request.headers.get('X-Razorpay-Signature')
+        if not signature:
+            return web.Response(status=400, text="Missing signature")
+        
+        # Get request body
+        body = await request.text()
+        
+        # Verify webhook signature
+        expected_signature = hmac.new(
+            webhook_secret.encode('utf-8'),
+            body.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        if signature != expected_signature:
+            return web.Response(status=400, text="Invalid signature")
+        
+        # Parse webhook data
+        data = json.loads(body)
+        
+        # Check if payment was successful
+        if data.get('event') == 'payment.captured':
+            payment_data = data.get('payload', {}).get('payment', {})
+            order_id = payment_data.get('entity', {}).get('order_id')
+            
+            # Extract user ID from order_id (format: order_{uid}_{timestamp})
+            if order_id and order_id.startswith('order_'):
+                parts = order_id.split('_')
+                if len(parts) >= 3:
+                    uid = int(parts[1])
+                    
+                    # Set premium subscription
+                    expiry = datetime.now() + timedelta(days=PREMIUM_DURATION_DAYS)
+                    premium_subscriptions[uid] = {'expiry_date': expiry}
+                    
+                    # Clear usage limits
+                    if uid in user_usage:
+                        del user_usage[uid]
+                    
+                    print(f"Premium activated for user {uid} until {expiry}")
+        
+        return web.Response(status=200, text="Webhook processed successfully")
+    
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return web.Response(status=500, text=f"Webhook error: {str(e)}")
+
+
+# Register Razorpay webhook
+async def register_razorpay_webhook(app: web.Application):
+    """Register Razorpay webhook endpoint."""
+    app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
+
+
+# Update on_startup to register webhook
+async def on_startup(dispatcher: Dispatcher):
+    print("🚀 on_startup called, WEBHOOK_URL =", WEBHOOK_URL)
+    if WEBHOOK_URL:
+        await bot.set_webhook(WEBHOOK_URL)
+        print(f"Webhook set to {WEBHOOK_URL}")
+        
+        # Register Razorpay webhook
+        from aiohttp import web
+        razorpay_app = web.Application()
+        await register_razorpay_webhook(razorpay_app)
+        
+        from aiogram.webhook.aiohttp_server import SimpleRequestHandler
+        handler = SimpleRequestHandler(dispatcher=dispatcher, bot=bot)
+        handler.register(razorpay_app, path='/razorpay')
+        
+        runner = web.AppRunner(razorpay_app)
+        await runner.setup()
+        port = 8081  # Different port for Razorpay webhook
+        site = web.TCPSite(runner, host='0.0.0.0', port=port)
+        await site.start()
+        print(f'✅ Razorpay webhook server running on port {port}')
+        
+        # Main app
+        app = web.Application()
+        
+        # Health check endpoint — Render health checker sends GET /health
+        async def health(request):
+            return web.Response(text='OK', status=200)
+        
+        app.router.add_get('/health', health)
+        app.router.add_post('/health', health)
+        
+        handler = SimpleRequestHandler(dispatcher=dispatcher, bot=bot)
+        handler.register(app, path='/')
+        runner = web.AppRunner(app)
+        await runner.setup()
+        port = int(os.getenv('PORT', '8080'))
+        site = web.TCPSite(runner, host='0.0.0.0', port=port)
+        await site.start()
+        print(f'✅ Main webhook server running on port {port}')
         await asyncio.Event().wait()
     else:
         print('No WEBHOOK_URL – long‑polling mode')
