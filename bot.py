@@ -1527,39 +1527,49 @@ async def say_hi(cb: types.CallbackQuery):
     uid = cb.from_user.id
     partner = int(cb.data.split(':')[1])
 
-    # Verify mutual match and active chat
     if uid not in active_matches or partner not in active_matches.get(uid, {}):
         await cb.answer("⚠️ You are not matched with this user.", show_alert=True)
         return
-    
+
     if uid not in current_chat or current_chat[uid] != partner:
         await cb.answer("⚠️ You are not in an active chat with this user.", show_alert=True)
         return
 
     partner_name = user_profiles[partner]['name']
-    
-    # Send 'Hi' message to partner
+
+    # Disable the button immediately to prevent duplicate clicks
+    await cb.message.edit_reply_markup(reply_markup=None)
+    await cb.answer()
+
+    # Send Hi to partner
     try:
         await bot.send_message(
             partner,
             f"👋 *{user_profiles[uid]['name']}* said: Hi!",
             parse_mode='Markdown',
         )
-        
-        # Update the chat interface to show the 'Hi' was sent
+    except Exception as e:
+        print(f"SayHi send error: {e}")
+
+    # Show confirmation in sender's chat
+    try:
         await cb.message.edit_text(
             f"💬 *Chat started with {partner_name}*\n\n"
-            "Send your messages below. Tap below to say 'Hi'.\n\n"
+            "Send your messages below.\n\n"
             "👋 *You said: Hi!*",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{partner}')],
-            ]),
         )
-        
-        await cb.answer("Hi sent!")
     except Exception as e:
-        await cb.answer("⚠️ Couldn't send the message. They may have blocked the bot.")
+        print(f"SayHi edit error: {e}")
+        # Fallback: send a new message if edit fails
+        try:
+            await bot.send_message(
+                uid,
+                f"👋 *You said: Hi!* to {partner_name}",
+                parse_mode='Markdown',
+            )
+        except:
+            pass
 
 
 # ── Message relay (the core chat feature) ────────────────────────────────────
