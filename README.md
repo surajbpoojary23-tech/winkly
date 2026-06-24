@@ -25,7 +25,7 @@ cp .env.example .env
 #   REDIS_URL=YOUR_UPSTASH_REDIS_URL (e.g. redis://...)
 python bot.py
 ```
-The bot will start polling. Open Telegram, send `/start`, share your location and run `/find`.
+The bot will start polling. Open Telegram, send `/start`, share your location and tap *❤️  Find Matches*.
 
 ## Deployment on Render (free tier)
 1. Create a new **Web Service** on Render linked to the Git repo (or push the local folder).

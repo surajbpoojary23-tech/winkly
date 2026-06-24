@@ -17,6 +17,7 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardRemove,
 )
+import razorpay
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
@@ -30,8 +31,13 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL') or 'https://winkly-kmsz.onrender.com'
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', 'rzp_live_T5RFsK3b9AYBTX')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', 'MBAphgobB9XnZ33SylDA9r7C')
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', 'rzp_webhook_secret_here')
-PREMIUM_PRICE_INR = 399  # Rs399 per year
-PREMIUM_DURATION_DAYS = 365
+
+# Initialize Razorpay client
+try:
+    razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+except Exception as e:
+    print(f"⚠️ Failed to initialize Razorpay client: {e}")
+    razorpay_client = None
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -196,7 +202,7 @@ def get_usage_summary(uid: int) -> str:
     usage = get_user_usage(uid)
     texts_left = max(0, 10 - usage['texts_sent'])
     matches_left = max(0, 10 - usage['match_count'])
-    return f"📝 *Free* - {texts_left} texts left per match, {matches_left} matches left total\n💰 Upgrade for unlimited access (Rs399/year)"
+    return f"📝 *Free* - {texts_left} texts left per match, {matches_left} matches left total\n💎 Upgrade from just Rs49/day — tap /premium"
 
 
 # ── Gender normalisation ───────────────────────────────────────────────────────
@@ -901,6 +907,20 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
+    if not check_match_limit(uid):
+        await cb.message.answer(
+            "⚠️ You've used all your free matches.\n\n"
+            "💎 Continue at just Rs49 — get unlimited matches for a day!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+                [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+                [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+            ]),
+        )
+        await cb.answer()
+        return
+
     me = user_profiles[uid]
     
     # First, check if there's someone waiting for us in the queue
@@ -1218,9 +1238,16 @@ async def start_chat(cb: types.CallbackQuery):
 
 
 
-@dp.callback_query(lambda cb: cb.data == 'upgrade_premium')
-async def upgrade_premium(cb: types.CallbackQuery):
-    """Handle premium upgrade request."""
+LONG_PLANS = [
+    {"name": "Monthly", "price": 199, "duration": 30},
+    {"name": "3 Months", "price": 299, "duration": 90},
+    {"name": "6 Months", "price": 499, "duration": 180},
+    {"name": "1 Year", "price": 699, "duration": 365},
+]
+
+@dp.callback_query(lambda cb: cb.data == 'see_more_plans')
+async def see_more_plans(cb: types.CallbackQuery):
+    """Show long-term premium plans (Plans 2-5)."""
     uid = cb.from_user.id
     
     if is_premium_user(uid):
@@ -1236,70 +1263,164 @@ async def upgrade_premium(cb: types.CallbackQuery):
         await cb.answer()
         return
     
-    # Premium subscription plans
-    premium_plans = [
-        {"name": "Monthly", "price": 99, "duration": 30, "savings": ""},
-        {"name": "3 Months", "price": 199, "duration": 90, "savings": "Save 37%"},
-        {"name": "6 Months", "price": 399, "duration": 180, "savings": "Save 55%"},
-        {"name": "1 Year", "price": 499, "duration": 365, "savings": "Save 62%"},
-    ]
-    
-    # Create inline keyboard for premium plans
     plan_keyboard = []
-    for plan in premium_plans:
+    for plan in LONG_PLANS:
+        daily_rate = 49
+        discount = int((1 - plan['price'] / (daily_rate * plan['duration'])) * 100)
         plan_keyboard.append([
             InlineKeyboardButton(
-                text=f"💎 {plan['name']} - Rs{plan['price']} ({plan['duration']} days){' - ' + plan['savings'] if plan['savings'] else ''}",
+                text=f"💎 {plan['name']} - Rs{plan['price']} (Save {discount}%)",
                 callback_data=f"select_premium:{plan['name']}:{plan['price']}:{plan['duration']}"
             )
         ])
     
+    plan_keyboard.append([InlineKeyboardButton(text="◀️ Back", callback_data='back_to_limits')])
     plan_keyboard.append([InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')])
     
+    lines = ["💎 *Premium Plans - Save More*\n"]
+    for plan in LONG_PLANS:
+        daily_rate = 49
+        discount = int((1 - plan['price'] / (daily_rate * plan['duration'])) * 100)
+        per_day = round(plan['price'] / plan['duration'])
+        lines.append(f"• {plan['name']} — Rs{plan['price']}  (~Rs{per_day}/day, save {discount}%)")
+    lines.append(f"\nOr go back and get 1 day for just Rs49.")
+    
     await cb.message.edit_text(
-        f"💎 *Premium Subscription Plans*\n\n"
-        f"Choose your preferred plan:\n\n"
-        f"✅ Unlimited texts and matches\n"
-        f"✅ Priority matching\n"
-        f"✅ Ad-free experience\n\n"
-        f"*All plans are auto-renewable and can be cancelled anytime*",
+        "\n".join(lines),
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=plan_keyboard),
     )
-    await cb.answer("Select your premium plan:")
+    await cb.answer()
 
+
+def _create_payment_link_sync(uid: int, plan_name: str, price: int, duration: int) -> str | None:
+    """Synchronous Razorpay Payment Link creation."""
+    try:
+        response = razorpay_client.payment_link.create({
+            "amount": price * 100,
+            "currency": "INR",
+            "description": f"Winkly Premium - {plan_name}",
+            "notes": {
+                "uid": str(uid),
+                "duration_days": str(duration),
+            },
+            "callback_url": f"{WEBHOOK_URL}/payment/success",
+            "callback_method": "get",
+        })
+        return response.get("short_url")
+    except Exception as e:
+        print(f"Razorpay payment link error: {e}")
+        return None
+
+async def create_payment_link(uid: int, plan_name: str, price: int, duration: int) -> str | None:
+    """Create a Razorpay Payment Link in a thread to avoid blocking the event loop."""
+    if not razorpay_client:
+        return None
+    return await asyncio.to_thread(_create_payment_link_sync, uid, plan_name, price, duration)
 
 @dp.callback_query(lambda cb: cb.data.startswith('select_premium:'))
 async def select_premium(cb: types.CallbackQuery):
-    """Handle premium plan selection."""
+    """Handle premium plan selection — create real Razorpay Payment Link."""
     uid = cb.from_user.id
     parts = cb.data.split(':')
     plan_name = parts[1]
     price = int(parts[2])
     duration = int(parts[3])
     
-    # Generate order ID
-    order_id = f"order_{uid}_{int(datetime.now().timestamp())}"
-    amount = price * 100  # Convert to paise
+    await cb.message.edit_text(
+        f"⏳ Creating your payment link for *{plan_name}*...",
+        parse_mode='Markdown',
+    )
     
-    # Send payment details to user
+    payment_url = await create_payment_link(uid, plan_name, price, duration)
+    
+    if not payment_url:
+        await cb.message.edit_text(
+            "⚠️ Sorry, we couldn't create a payment link right now.\n\n"
+            "Please try again later or contact support.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Back", callback_data='see_more_plans')],
+            ]),
+        )
+        await cb.answer("Payment creation failed", show_alert=True)
+        return
+    
     await cb.message.edit_text(
         f"💎 *Premium Subscription - {plan_name}*\n\n"
         f"Price: Rs{price} for {duration} days\n\n"
         f"✅ Unlimited texts and matches\n"
-        f"✅ Priority matching\n"
-        f"✅ Ad-free experience\n\n"
-        f"🔗 *Payment Link:* https://checkout.razorpay.com/payment/{order_id}\n\n"
-        f"📱 *Scan QR Code:* (Use Razorpay app or website)\n\n"
-        f"⏰ *Valid for:* {duration} days\n\n"
-        "Tap below to proceed with payment:",
+        f"✅ Priority matching\n\n"
+        "Tap below to complete your payment:",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Pay Now", url=f"https://checkout.razorpay.com/payment/{order_id}")],
+            [InlineKeyboardButton(text="💳 Pay Rs{price}", url=payment_url)],
             [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
         ]),
     )
-    await cb.answer("Payment initiated! Complete payment to activate premium.")
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'buy_1day')
+async def buy_1day(cb: types.CallbackQuery):
+    """Handle 1-day premium purchase."""
+    uid = cb.from_user.id
+    
+    if is_premium_user(uid):
+        await cb.message.edit_text(
+            "💎 You're already premium! Enjoy unlimited access.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+            ]),
+        )
+        await cb.answer()
+        return
+    
+    await cb.message.edit_text(
+        "⏳ Creating your payment link for *1 Day Premium*...",
+        parse_mode='Markdown',
+    )
+    
+    payment_url = await create_payment_link(uid, "1 Day", 49, 1)
+    
+    if not payment_url:
+        await cb.message.edit_text(
+            "⚠️ Sorry, we couldn't create a payment link right now.\n\n"
+            "Please try again later or contact support.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Back", callback_data='see_more_plans')],
+            ]),
+        )
+        await cb.answer("Payment creation failed", show_alert=True)
+        return
+    
+    await cb.message.edit_text(
+        f"💎 *1 Day Premium - Rs49*\n\n"
+        f"✅ Unlimited texts and matches for 24 hours\n\n"
+        "Tap below to complete your payment:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Pay Rs49", url=payment_url)],
+            [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+            [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+        ]),
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'back_to_limits')
+async def back_to_limits(cb: types.CallbackQuery):
+    """Show the upgrade options popup (1-day + See More Plans)."""
+    await cb.message.edit_text(
+        "💎 *Upgrade Winkly Premium*\n\n"
+        "Continue at just Rs49 — get unlimited texts & matches for a day!",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+            [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+            [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+        ]),
+    )
+    await cb.answer()
 
 
 @dp.message(Command('premium'))
@@ -1330,17 +1451,17 @@ async def cmd_premium(message: types.Message):
             ]),
         )
     else:
+        usage = get_user_usage(uid)
+        texts_left = max(0, 10 - usage['texts_sent'])
+        matches_left = max(0, 10 - usage['match_count'])
         await message.answer(
-            f"💎 *Premium Subscription*\n\n"
-            f"Upgrade to premium for Rs{PREMIUM_PRICE_INR}/year and enjoy:\n\n"
-            f"✅ Unlimited texts and matches\n"
-            f"✅ Priority matching\n"
-            f"✅ Ad-free experience\n\n"
-            f"Your current usage:\n"
-            f"{get_usage_summary(uid)}",
+            f"💎 *Premium Plans*\n\n"
+            f"Your usage: {texts_left} texts left, {matches_left} matches left\n\n"
+            f"Choose how you'd like to upgrade:",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Upgrade to Premium", callback_data='upgrade_premium')],
+                [InlineKeyboardButton(text="💎 1 Day - Rs49", callback_data='buy_1day')],
+                [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
                 [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
             ]),
         )
@@ -1429,12 +1550,12 @@ async def relay_message(message: types.Message, state: FSMContext):
     # Check text limit for free users
     if not check_text_limit(uid):
         await message.answer(
-            "⚠️ You've reached your daily limit of 10 texts per match.\n\n"
-            "💰 Upgrade to premium for unlimited texts (Rs399/year)\n"
-            "Tap below to upgrade:",
+            "⚠️ You've reached your free limit for this match.\n\n"
+            "💎 Continue at just Rs49 — get unlimited texts & matches for a day!",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Upgrade to Premium", callback_data='upgrade_premium')],
+                [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+                [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
                 [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
             ]),
         )
@@ -1640,130 +1761,149 @@ async def on_startup(dispatcher: Dispatcher):
         await dp.start_polling(bot, skip_updates=False)
 
 
-@dp.callback_query(lambda cb: cb.data == 'upgrade_premium')
-async def upgrade_premium(cb: types.CallbackQuery):
-    """Handle premium upgrade request."""
-    uid = cb.from_user.id
-    
-    # Set premium subscription (Rs399/year)
-    expiry = datetime.now() + timedelta(days=365)
-    premium_subscriptions[uid] = {'expiry_date': expiry}
-    
-    # Clear usage limits
-    if uid in user_usage:
-        del user_usage[uid]
-    
-    await cb.message.edit_text(
-        "💎 *Premium Activated!*\n\n"
-        "You now have unlimited texts and matches!\n\n"
-        "Tap below to find your first match:",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-        ]),
-    )
-    await cb.answer("Premium activated! Enjoy unlimited access!")
-
-
 # ── Razorpay webhook handler ───────────────────────────────────────────────
+# Track processed payment IDs to prevent duplicate activation
+_processed_payments: set = set()
 
 async def handle_razorpay_webhook(request: web.Request):
-    """Handle Razorpay payment webhook."""
+    """Handle Razorpay payment webhook (payment_link.paid / payment.captured)."""
     try:
-        # Get webhook secret from environment
         webhook_secret = RAZORPAY_WEBHOOK_SECRET
         if not webhook_secret:
             return web.Response(status=400, text="Webhook secret not configured")
-        
-        # Get signature from headers
+
         signature = request.headers.get('X-Razorpay-Signature')
         if not signature:
             return web.Response(status=400, text="Missing signature")
-        
-        # Get request body
+
         body = await request.text()
-        
-        # Verify webhook signature
+
         expected_signature = hmac.new(
             webhook_secret.encode('utf-8'),
             body.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
-        
+
         if signature != expected_signature:
             return web.Response(status=400, text="Invalid signature")
-        
-        # Parse webhook data
+
         data = json.loads(body)
-        
-        # Check if payment was successful
-        if data.get('event') == 'payment.captured':
-            payment_data = data.get('payload', {}).get('payment', {})
-            order_id = payment_data.get('entity', {}).get('order_id')
-            
-            # Extract user ID from order_id (format: order_{uid}_{timestamp})
-            if order_id and order_id.startswith('order_'):
-                parts = order_id.split('_')
-                if len(parts) >= 3:
-                    uid = int(parts[1])
-                    
-                    # Set premium subscription
-                    expiry = datetime.now() + timedelta(days=PREMIUM_DURATION_DAYS)
-                    premium_subscriptions[uid] = {'expiry_date': expiry}
-                    
-                    # Clear usage limits
-                    if uid in user_usage:
-                        del user_usage[uid]
-                    
-                    print(f"Premium activated for user {uid} until {expiry}")
-        
+        event = data.get('event', '')
+
+        # Extract notes from payment_link.paid or payment.captured
+        notes = {}
+        pid = None
+        if event == 'payment_link.paid':
+            entity = data.get('payload', {}).get('payment_link', {}).get('entity', {})
+            notes = entity.get('notes', {})
+            pid = entity.get('id')
+        elif event == 'payment.captured':
+            entity = data.get('payload', {}).get('payment', {}).get('entity', {})
+            notes = entity.get('notes', {})
+            pid = entity.get('id')
+
+        # If no notes from event level, try order notes
+        if not notes:
+            order_entity = data.get('payload', {}).get('order', {}).get('entity', {})
+            notes = order_entity.get('notes', {})
+
+        uid_str = notes.get('uid')
+        duration_str = notes.get('duration_days')
+
+        if uid_str and duration_str and pid:
+            if pid in _processed_payments:
+                return web.Response(status=200, text="Already processed")
+
+            uid = int(uid_str)
+            duration_days = int(duration_str)
+            expiry = datetime.now() + timedelta(days=duration_days)
+            premium_subscriptions[uid] = {'expiry_date': expiry}
+
+            if uid in user_usage:
+                del user_usage[uid]
+
+            _processed_payments.add(pid)
+            print(f"💎 Premium activated for user {uid}, plan={duration_days}d, until {expiry}")
+        else:
+            print(f"Webhook event={event} missing uid/duration in notes: {notes}")
+
         return web.Response(status=200, text="Webhook processed successfully")
-    
+
     except Exception as e:
         print(f"Webhook error: {e}")
         return web.Response(status=500, text=f"Webhook error: {str(e)}")
 
 
-# Register Razorpay webhook
-async def register_razorpay_webhook(app: web.Application):
-    """Register Razorpay webhook endpoint."""
-    app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
+async def payment_success_page(request: web.Request):
+    """Simple payment success page shown after Razorpay checkout."""
+    return web.Response(
+        content_type='text/html',
+        text="""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Payment Successful - Winkly</title>
+<style>body{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}
+.card{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}
+.check{font-size:64px;margin-bottom:16px}
+.btn{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}
+</style></head><body>
+<div class="card"><div class="check">✅</div>
+<h1>Payment Successful!</h1>
+<p>Your Winkly premium subscription is now active.</p>
+<p>Return to Telegram to start matching.</p>
+<a class="btn" href="https://t.me/winklybot">Open Telegram</a>
+</div></body></html>"""
+    )
 
 
-# Update on_startup to register webhook
+async def auto_setup_razorpay_webhook():
+    """Auto-create Razorpay webhook via API if not already configured."""
+    if not razorpay_client:
+        print("⚠️ Razorpay client unavailable — skip auto webhook setup")
+        return
+    try:
+        existing = await asyncio.to_thread(lambda: razorpay_client.webhook.all())
+        target_url = f"{WEBHOOK_URL}/razorpay/webhook"
+        for wh in existing.get('items', []):
+            if wh.get('url') == target_url:
+                print(f"✅ Razorpay webhook already exists: {wh.get('id')}")
+                return
+        resp = await asyncio.to_thread(
+            lambda: razorpay_client.webhook.create({
+                "url": target_url,
+                "events": ["payment_link.paid", "payment.captured"],
+                "secret": RAZORPAY_WEBHOOK_SECRET,
+                "active": True,
+            })
+        )
+        print(f"✅ Razorpay webhook auto-created: {resp.get('id')}")
+    except Exception as e:
+        print(f"⚠️ Auto webhook setup failed ({e})")
+        print(f"   Create manually: Razorpay Dashboard → Settings → Webhooks")
+        print(f"   URL: {WEBHOOK_URL}/razorpay/webhook")
+        print(f"   Events: payment_link.paid, payment.captured")
+        print(f"   Secret: {RAZORPAY_WEBHOOK_SECRET}")
+
+
 async def on_startup(dispatcher: Dispatcher):
     print("🚀 on_startup called, WEBHOOK_URL =", WEBHOOK_URL)
     if WEBHOOK_URL:
         await bot.set_webhook(WEBHOOK_URL)
         print(f"Webhook set to {WEBHOOK_URL}")
-        
-        # Register Razorpay webhook
-        from aiohttp import web
-        razorpay_app = web.Application()
-        await register_razorpay_webhook(razorpay_app)
-        
+        await auto_setup_razorpay_webhook()
+
         from aiogram.webhook.aiohttp_server import SimpleRequestHandler
         handler = SimpleRequestHandler(dispatcher=dispatcher, bot=bot)
-        handler.register(razorpay_app, path='/razorpay')
-        
-        runner = web.AppRunner(razorpay_app)
-        await runner.setup()
-        port = 8081  # Different port for Razorpay webhook
-        site = web.TCPSite(runner, host='0.0.0.0', port=port)
-        await site.start()
-        print(f'✅ Razorpay webhook server running on port {port}')
-        
-        # Main app
+
+        # Main app — serves health, Razorpay webhook, payment success, and bot webhook
         app = web.Application()
-        
-        # Health check endpoint — Render health checker sends GET /health
+
         async def health(request):
             return web.Response(text='OK', status=200)
-        
+
         app.router.add_get('/health', health)
         app.router.add_post('/health', health)
-        
-        handler = SimpleRequestHandler(dispatcher=dispatcher, bot=bot)
+        app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
+        app.router.add_get('/payment/success', payment_success_page)
         handler.register(app, path='/')
         runner = web.AppRunner(app)
         await runner.setup()
