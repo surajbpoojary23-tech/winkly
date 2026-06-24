@@ -1214,11 +1214,10 @@ async def start_chat(cb: types.CallbackQuery):
     partner_name = user_profiles[partner]['name']
     await cb.message.edit_text(
         f"💬 *Chat started with {partner_name}*\n\n"
-        "Send your messages below. Tap below to say 'Hi' or end the chat.",
+        "Send your messages below. Tap below to say 'Hi'.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{partner}')],
-            [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
         ]),
     )
 
@@ -1226,11 +1225,10 @@ async def start_chat(cb: types.CallbackQuery):
     await bot.send_message(
         partner,
         f"💬 *{user_profiles[uid]['name']}* started chatting!\n\n"
-        "You can say 'Hi' or end the chat.",
+        "You can say 'Hi'.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{uid}')],
-            [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{uid}')],
         ]),
     )
     await cb.answer()
@@ -1252,10 +1250,7 @@ async def end_chat_handler(cb: types.CallbackQuery):
 
     await cb.message.edit_text("🔚 *Chat ended.*\n\n"
                                "You can find someone new.",
-                               parse_mode='Markdown',
-                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                                   [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-                               ]))
+                               parse_mode='Markdown')
 
     # Also tell the partner
     try:
@@ -1264,9 +1259,6 @@ async def end_chat_handler(cb: types.CallbackQuery):
             f"🔚 *{user_profiles[uid]['name']}* ended the chat.\n\n"
             "You can find someone new.",
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-            ]),
         )
     except:
         pass
