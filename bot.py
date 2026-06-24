@@ -31,6 +31,7 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL') or 'https://winkly-kmsz.onrender.com'
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', 'rzp_live_T5RFsK3b9AYBTX')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', 'MBAphgobB9XnZ33SylDA9r7C')
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', 'rzp_webhook_secret_here')
+ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', '0'))
 
 # Initialize Razorpay client
 try:
@@ -57,8 +58,15 @@ class Setup(StatesGroup):
 
 
 # ── In-memory profile store ───────────────────────────────────────────────────
-# {user_id: {"name":…, "age":…, "gender":…, "bio":…, "lat":…, "lon":…, "likes": set(), "rejected": set()}}
+# {user_id: {"name":…, "age":…, "gender":…, "bio":…, "lat":…, "lon":…,
+#            "photo":…, "selfie":…, "verified": bool, "verification_status": str,
+#            "likes": set(), "rejected": set()}}
 user_profiles: dict = {}
+
+# ── Verification sessions ────────────────────────────────────────────────────
+# Tracks multi-step verification photo uploads per user
+# {user_id: "awaiting_photo" | "awaiting_selfie"}
+_verify_sessions: dict[int, str] = {}
 
 # ── Match & Chat stores ─────────────────────────────────────────────────────
 # likes_sent: {liker_id: set(liked_ids)} — legacy, kept for compatibility
@@ -109,6 +117,8 @@ def step_index(state: str) -> int:
 
 
 def profile_summary(data: dict) -> str:
+    verified_badge = "✅ Verified" if data.get('verified') else ""
+    photo_status = "✅" if data.get('photo') else "❌"
     return (
         "✅ *Your Profile*\n\n"
         f"📛  Name:       {data.get('name', '—')}\n"
@@ -117,6 +127,8 @@ def profile_summary(data: dict) -> str:
         f"📝  Bio:        {data.get('bio', '—') or '—'}\n"
         f"❤️  Interested: {data.get('preferred_gender', '—')}\n"
         f"📍  Location:   {_lat_lon(data)}\n"
+        f"📷  Photo:      {photo_status}\n"
+        + (f"🏅  Badge:      {verified_badge}\n" if verified_badge else "")
     )
 
 
@@ -165,9 +177,15 @@ def get_user_usage(uid: int) -> dict:
     return user_usage[uid]
 
 
+def is_verified_female(uid: int) -> bool:
+    """Check if user is a verified female (gets unlimited free access)."""
+    profile = user_profiles.get(uid, {})
+    return profile.get('gender') in ('Women', 'Female') and profile.get('verified') is True
+
+
 def check_text_limit(uid: int) -> bool:
     """Check if user has reached text limit (10 per match)."""
-    if is_premium_user(uid):
+    if is_premium_user(uid) or is_verified_female(uid):
         return True
     
     usage = get_user_usage(uid)
@@ -176,7 +194,7 @@ def check_text_limit(uid: int) -> bool:
 
 def check_match_limit(uid: int) -> bool:
     """Check if user has reached match limit (10 total)."""
-    if is_premium_user(uid):
+    if is_premium_user(uid) or is_verified_female(uid):
         return True
     
     usage = get_user_usage(uid)
@@ -484,7 +502,7 @@ async def handle_name(message: types.Message, state: FSMContext):
         if len(name) < 2:
             await message.answer("⚠️ Name must be at least 2 characters. Please enter a longer name:")
             return
-        await state.update_data(name=name)
+        await state.update_data(name=name, username=message.from_user.username)
 
         data = await state.get_data()
         next_state = Setup.age
@@ -930,6 +948,43 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
 
 # ── Review screen interactions ─────────────────────────────────────────────────
 
+# ── Match card helpers ──────────────────────────────────────────────────────────
+
+async def _send_match_card(chat_id: int, partner_profile: dict, partner_uid: int, match_type: str = "match"):
+    """Send a match notification with optional photo.
+    
+    match_type: "match" → "It's a Match!", "chat" → "Chat Now"
+    """
+    name = partner_profile.get('name', 'Someone')
+    age = partner_profile.get('age', '?')
+    gender = partner_profile.get('gender', '?')
+    bio = partner_profile.get('bio', '') or '—'
+    verified_badge = "  ✅" if partner_profile.get('verified') else ""
+    photo_id = partner_profile.get('photo')
+    
+    card_text = (
+        f"🎉 *It's a Match!*\n\n"
+        f"You and *{name}* are compatible!\n\n"
+        f"📛  {name}{verified_badge}\n"
+        f"🎂  {age}  |  ⚧ {gender}\n"
+        f"📝  {bio[:100]}\n\n"
+        "Tap below to start chatting:"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner_uid}')],
+    ])
+    
+    if photo_id:
+        try:
+            await bot.send_photo(chat_id, photo_id, caption=card_text, parse_mode='Markdown', reply_markup=kb)
+            return
+        except Exception as e:
+            print(f"Match card photo error: {e}")
+    
+    await bot.send_message(chat_id, card_text, parse_mode='Markdown', reply_markup=kb)
+
+
 # Store last shown matches per user for Like/Reject navigation
 _LAST_MATCHES: dict[int, list] = {}
 
@@ -944,16 +999,29 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
         return
 
     if not check_match_limit(uid):
-        await cb.message.answer(
-            "⚠️ You've used all your free matches.\n\n"
-            "💎 Continue at just Rs49 — get unlimited matches for a day!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
-                [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
-                [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
-            ]),
-        )
+        me = user_profiles.get(uid, {})
+        # Unverified females → verification popup instead of premium
+        if me.get('gender') in ('Women', 'Female') and not me.get('verified'):
+            await cb.message.answer(
+                "⚠️ You've reached your free limit.\n\n"
+                "📸 Verify your profile to continue chatting (free & unlimited).",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_now')],
+                    [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+                ]),
+            )
+        else:
+            await cb.message.answer(
+                "⚠️ You've used all your free matches.\n\n"
+                "💎 Continue at just Rs49 — get unlimited matches for a day!",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+                    [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+                    [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+                ]),
+            )
         await cb.answer()
         return
 
@@ -985,33 +1053,14 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
             del waiting_queue[partner]
         
         # Notify both users of instant match
-        await bot.send_message(
-            uid,
-            f"🎉 *It's a Match!*\n\n"
-            f"You and *{partner_name}* are compatible!\n\n"
-            f"📛  {partner_name}\n"
-            f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
-            f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
-            "Tap below to start chatting:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
-            ]),
-        )
+        await _send_match_card(uid, waiting_match, partner)
+        await _send_match_card(partner, me, uid)
         
-        await bot.send_message(
-            partner,
-            f"🎉 *It's a Match!*\n\n"
-            f"You and *{me['name']}* are compatible!\n\n"
-            f"📛  {me['name']}\n"
-            f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
-            f"📝  {me.get('bio', '') or '—'}\n\n"
-            "Tap below to start chatting:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
-            ]),
-        )
+        # Clean up the "Find Matches" button message
+        try:
+            await cb.message.delete()
+        except:
+            pass
         
         await cb.answer()
         return
@@ -1069,39 +1118,25 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
             if partner in waiting_queue:
                 del waiting_queue[partner]
             
-            # Update the searching message
+            # Delete old messages and send fresh match card
             try:
-                await bot.edit_message_text(
-                    chat_id=cb.message.chat.id,
-                    message_id=search_msg.message_id,
-                    text=f"🎉 *{me['name']}*, you matched with *{partner_name}*!\n\n"
-                         f"📛  {partner_name}\n"
-                         f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
-                         f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
-                         "Tap below to start chatting:",
-                    parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
-                    ]),
-                )
+                await cb.message.delete()  # "Find Matches" button message
+            except:
+                pass
+            try:
+                await bot.delete_message(cb.message.chat.id, search_msg.message_id)  # "Searching..." message
+            except:
+                pass
+            
+            # Send fresh match card (with photo if available)
+            try:
+                await _send_match_card(uid, waiting_match, partner)
             except:
                 pass
             
             # Notify the partner as well
             try:
-                await bot.send_message(
-                    partner,
-                    f"🎉 *It's a Match!*\n\n"
-                    f"You and *{me['name']}* are compatible!\n\n"
-                    f"📛  {me['name']}\n"
-                    f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
-                    f"📝  {me.get('bio', '') or '—'}\n\n"
-                    "Tap below to start chatting:",
-                    parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
-                    ]),
-                )
+                await _send_match_card(partner, me, uid)
             except:
                 pass
         else:
@@ -1140,10 +1175,35 @@ async def _show_next_match(message, uid: int, idx: int):
     user_profiles[uid]['_current_match_uid'] = m['uid']
 
     bio_line = f"\n📝  {m.get('bio', '')[:100]}" if m.get('bio') else ""
-    await message.answer(
-        f"👤 *{m['name']}*\n"
+    verified_badge = "  ✅" if m.get('verified') else ""
+    card_text = (
+        f"👤 *{m['name']}*{verified_badge}\n"
         f"🎂  Age: {m['age']}  |  ⚧ {m['gender']}\n"
-        f"📍  {m['distance_km']} km away{bio_line}",
+        f"📍  {m['distance_km']} km away{bio_line}"
+    )
+    
+    # Send photo if available, else text-only
+    photo_id = m.get('photo')
+    if photo_id:
+        try:
+            await bot.send_photo(
+                chat_id=message.chat.id,
+                photo=photo_id,
+                caption=card_text,
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❤️  Like", callback_data=f'like:{m["uid"]}'),
+                     InlineKeyboardButton(text="❌  Skip", callback_data=f'skip:{m["uid"]}')],
+                    [InlineKeyboardButton(text="⬇️  More matches", callback_data='show_more_matches')],
+                ]),
+            )
+            return
+        except Exception as e:
+            print(f"Match card photo error: {e}")
+            # Fall through to text-only
+    
+    await message.answer(
+        card_text,
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❤️  Like", callback_data=f'like:{m["uid"]}'),
@@ -1178,33 +1238,8 @@ async def handle_like(cb: types.CallbackQuery):
         _L = user_profiles[liker]
         _R = user_profiles[liked]
 
-        await bot.send_message(
-            liker,
-            f"🎉 *It's a Match!*\n\n"
-            f"You and *{_R['name']}* liked each other!\n\n"
-            f"📛  {_R['name']}\n"
-            f"🎂  {_R['age']}  |  ⚧ {_R['gender']}\n"
-            f"📝  {_R.get('bio', '') or '—'}\n\n"
-            "Tap below to start chatting:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{liked}')],
-            ]),
-        )
-
-        await bot.send_message(
-            liked,
-            f"🎉 *It's a Match!*\n\n"
-            f"You and *{_L['name']}* liked each other!\n\n"
-            f"📛  {_L['name']}\n"
-            f"🎂  {_L['age']}  |  ⚧ {_L['gender']}\n"
-            f"📝  {_L.get('bio', '') or '—'}\n\n"
-            "Tap below to start chatting:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{liker}')],
-            ]),
-        )
+        await _send_match_card(liker, _R, liked)
+        await _send_match_card(liked, _L, liker)
     else:
         # One-sided like — send a subtle acknowledgment
         await bot.send_message(liker, "❤️ Liked! If they like you back, it's a match.")
@@ -1521,6 +1556,305 @@ async def back_to_profile(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
+# ── Female Verification System ─────────────────────────────────────────────────
+
+def _verification_status_text(uid: int) -> str:
+    """Return human-readable verification status text for a user."""
+    profile = user_profiles.get(uid, {})
+    status = profile.get('verification_status', 'none')
+    if profile.get('verified'):
+        return "✅ *Verified* — You have unlimited free access."
+    if status == 'pending':
+        return "⏳ *Verification under review* — Our team is checking your photos."
+    if status == 'rejected':
+        return "❌ *Verification rejected* — The selfie didn't match your profile photo.\n\nTap below to retry."
+    return "📸 *Not verified* — Get your verified badge to unlock unlimited chatting."
+
+
+async def _send_to_admin(uid: int):
+    """Send verification request to the admin chat for review."""
+    profile = user_profiles.get(uid, {})
+    if not profile or not ADMIN_CHAT_ID:
+        return
+    
+    name = profile.get('name', 'Unknown')
+    age = profile.get('age', '?')
+    gender = profile.get('gender', '?')
+    bio = profile.get('bio', '—')
+    username = f"@{profile.get('username', '—')}" if profile.get('username') else '—'
+    photo_id = profile.get('photo')
+    selfie_id = profile.get('selfie')
+    
+    text = (
+        f"📸 *New verification request*\n\n"
+        f"👤 {name} ({age}, {gender})\n"
+        f"🆔 Telegram: `{uid}`\n"
+        f"📛 Username: {username}\n"
+        f"📝 Bio: {bio[:80] if bio else '—'}\n\n"
+        f"*Profile photo (top) vs Selfie (bottom)* — do they match?"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Match — Approve", callback_data=f'admin_approve:{uid}'),
+         InlineKeyboardButton(text="❌ No Match — Reject", callback_data=f'admin_reject:{uid}')],
+    ])
+    
+    # Send profile photo then selfie with the review text
+    if photo_id:
+        try:
+            await bot.send_photo(ADMIN_CHAT_ID, photo_id, caption=text, parse_mode='Markdown', reply_markup=kb)
+        except Exception as e:
+            print(f"Admin send photo error: {e}")
+            await bot.send_message(ADMIN_CHAT_ID, f"{text}\n\n(Photo not accessible)", parse_mode='Markdown', reply_markup=kb)
+    else:
+        await bot.send_message(ADMIN_CHAT_ID, text + "\n\n(No profile photo)", parse_mode='Markdown', reply_markup=kb)
+    
+    if selfie_id:
+        try:
+            await bot.send_photo(ADMIN_CHAT_ID, selfie_id, caption="📸 Selfie (for comparison)")
+        except Exception as e:
+            print(f"Admin send selfie error: {e}")
+
+
+@dp.callback_query(lambda cb: cb.data == 'verify_now')
+async def verify_now(cb: types.CallbackQuery):
+    """Start the verification flow — ask user to send a profile photo."""
+    uid = cb.from_user.id
+    await cb.answer()
+    
+    if uid not in user_profiles:
+        await cb.message.answer("📝 Please set up your profile first with /start.")
+        return
+    
+    # Check if already verified
+    if user_profiles[uid].get('verified'):
+        await cb.message.answer("✅ You're already verified! Enjoy unlimited access.")
+        return
+    
+    # Start verification session
+    _verify_sessions[uid] = 'awaiting_photo'
+    await cb.message.answer(
+        "📸 *Step 1: Profile Photo*\n\n"
+        "Send a good, clear photo of yourself.\n"
+        "This will be shown to other users as your profile picture.\n\n"
+        "_Make sure your face is clearly visible._",
+        parse_mode='Markdown',
+    )
+
+
+@dp.message(lambda m: m.from_user.id in _verify_sessions)
+async def handle_verify_photo(message: types.Message):
+    """Handle photo uploads during the verification flow."""
+    uid = message.from_user.id
+    step = _verify_sessions.get(uid)
+    
+    # If user sends text instead of photo during verification
+    if not message.photo:
+        if step == 'awaiting_photo':
+            await message.answer("📸 Please send a *photo* (not text). Upload a clear picture of yourself.", parse_mode='Markdown')
+        elif step == 'awaiting_selfie':
+            await message.answer("📸 Please send a *selfie photo* (not text). A clear selfie looking at the camera.", parse_mode='Markdown')
+        return
+    """Handle photo uploads during the verification flow."""
+    uid = message.from_user.id
+    step = _verify_sessions.get(uid)
+    
+    if step == 'awaiting_photo':
+        # Save profile photo
+        file_id = message.photo[-1].file_id
+        user_profiles[uid]['photo'] = file_id
+        
+        # Advance to selfie step
+        _verify_sessions[uid] = 'awaiting_selfie'
+        await message.answer(
+            "✅ Great profile photo!\n\n"
+            "📸 *Step 2: Verification Selfie*\n\n"
+            "Now send a *selfie* looking straight at the camera.\n"
+            "This is only visible to our admin team for verification.\n\n"
+            "_Keep your face clearly visible, good lighting._",
+            parse_mode='Markdown',
+        )
+    
+    elif step == 'awaiting_selfie':
+        # Save selfie
+        file_id = message.photo[-1].file_id
+        user_profiles[uid]['selfie'] = file_id
+        user_profiles[uid]['verification_status'] = 'pending'
+        
+        # Clear session
+        del _verify_sessions[uid]
+        
+        # Notify user
+        await message.answer(
+            "✅ *Photos received!*\n\n"
+            "Our team will review your verification shortly.\n"
+            "You'll be notified once it's approved.\n\n"
+            "Thank you for your patience! 🎉",
+            parse_mode='Markdown',
+        )
+        
+        # Send to admin for review
+        await _send_to_admin(uid)
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('admin_approve:') or cb.data.startswith('admin_reject:'))
+async def admin_verification_action(cb: types.CallbackQuery):
+    """Admin approves or rejects a verification request."""
+    if cb.from_user.id != ADMIN_CHAT_ID:
+        await cb.answer("⛔ You're not authorized.", show_alert=True)
+        return
+    
+    action, uid_str = cb.data.split(':', 1)
+    uid = int(uid_str)
+    profile = user_profiles.get(uid)
+    
+    if not profile:
+        await cb.answer("⚠️ User profile no longer exists.", show_alert=True)
+        await cb.message.edit_text(cb.message.text + "\n\n_(User deleted)_")
+        return
+    
+    if action == 'admin_approve':
+        profile['verified'] = True
+        profile['verification_status'] = 'approved'
+        # Edit caption if message has photo, else edit text
+        try:
+            if cb.message.photo:
+                await cb.message.edit_caption(
+                    caption=cb.message.caption + f"\n\n✅ *Approved by admin*",
+                    parse_mode='Markdown',
+                )
+            else:
+                await cb.message.edit_text(
+                    cb.message.text + f"\n\n✅ *Approved by admin*",
+                    parse_mode='Markdown',
+                )
+        except Exception as e:
+            print(f"Admin approve edit error: {e}")
+        # Notify user
+        try:
+            await bot.send_message(
+                uid,
+                "🎉 *You're verified!*\n\n"
+                "✅ Your profiles photos matched and you've been verified.\n"
+                "You now have *unlimited free access* to chat with anyone!\n\n"
+                "Go find your match! ❤️",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❤️  Find Matches", callback_data='do_match')],
+                ]),
+            )
+        except Exception as e:
+            print(f"Admin notify user error: {e}")
+        await cb.answer("✅ User approved!")
+    
+    elif action == 'admin_reject':
+        profile['verification_status'] = 'rejected'
+        # Clear the selfie but keep the profile photo
+        profile['selfie'] = None
+        try:
+            if cb.message.photo:
+                await cb.message.edit_caption(
+                    caption=cb.message.caption + f"\n\n❌ *Rejected by admin*",
+                    parse_mode='Markdown',
+                )
+            else:
+                await cb.message.edit_text(
+                    cb.message.text + f"\n\n❌ *Rejected by admin*",
+                    parse_mode='Markdown',
+                )
+        except Exception as e:
+            print(f"Admin reject edit error: {e}")
+        # Notify user
+        try:
+            await bot.send_message(
+                uid,
+                "❌ *Verification not approved.*\n\n"
+                "The selfie didn't match your profile photo.\n\n"
+                "You can retry anytime with better photos using /verify.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📸 Retry Verification", callback_data='verify_now')],
+                ]),
+            )
+        except Exception as e:
+            print(f"Admin notify user error: {e}")
+        await cb.answer("❌ Rejected")
+
+
+@dp.message(Command('admin'))
+async def cmd_admin(message: types.Message):
+    """Show pending verification requests for admin review."""
+    uid = message.from_user.id
+    if uid != ADMIN_CHAT_ID:
+        await message.answer("⛔ You're not authorized to use this command.")
+        return
+    
+    pending = [(uid, prof) for uid, prof in user_profiles.items()
+               if prof.get('verification_status') == 'pending']
+    
+    if not pending:
+        await message.answer("📋 *No pending verification requests.*", parse_mode='Markdown')
+        return
+    
+    text_lines = [f"📋 *Pending Verifications: {len(pending)}*", ""]
+    for puid, prof in pending:
+        name = prof.get('name', 'Unknown')
+        age = prof.get('age', '?')
+        gender = prof.get('gender', '?')
+        text_lines.append(f"• {name} ({age}, {gender}) — `{puid}`")
+    
+    text_lines.append("")
+    text_lines.append("Requests are also sent to this chat as they come in.")
+    
+    await message.answer("\n".join(text_lines), parse_mode='Markdown')
+
+
+@dp.message(Command('verify'))
+async def cmd_verify(message: types.Message):
+    """Show verification status and start/retry verification (#get_verified_badge)."""
+    uid = message.from_user.id
+    
+    if uid not in user_profiles:
+        await message.answer("📝 Please set up your profile first with /start.")
+        return
+    
+    status_text = _verification_status_text(uid)
+    profile = user_profiles[uid]
+    current_status = profile.get('verification_status', 'none')
+    
+    if profile.get('verified'):
+        await message.answer(
+            f"🏅 *Verified Badge*\n\n{status_text}",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❤️  Find Matches", callback_data='do_match')],
+            ]),
+        )
+    elif current_status == 'pending':
+        await message.answer(
+            f"🏅 *Verification Status*\n\n{status_text}",
+            parse_mode='Markdown',
+        )
+    elif current_status == 'rejected':
+        await message.answer(
+            f"🏅 *Verification Status*\n\n{status_text}",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📸 Retry Verification", callback_data='verify_now')],
+            ]),
+        )
+    else:
+        await message.answer(
+            f"🏅 *Get Verified*\n\n{status_text}\n\n"
+            "Upload your profile photo + selfie to get verified.\n"
+            "Female users get unlimited free access after verification!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📸 Start Verification", callback_data='verify_now')],
+            ]),
+        )
+
+
 @dp.callback_query(lambda cb: cb.data.startswith('say_hi:'))
 async def say_hi(cb: types.CallbackQuery):
     """Send a 'Hi' message to the chat partner."""
@@ -1592,19 +1926,67 @@ async def relay_message(message: types.Message, state: FSMContext):
 
     partner = current_chat[uid]
     partner_name = user_profiles.get(partner, {}).get('name', 'Someone')
+    sender_name = user_profiles.get(uid, {}).get('name', 'Someone')
 
-    # Check text limit for free users
+    # Check text limit for the SENDER
     if not check_text_limit(uid):
-        await message.answer(
-            "⚠️ You've reached your free limit for this match.\n\n"
-            "💎 Continue at just Rs49 — get unlimited texts & matches for a day!",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
-                [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
-                [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
-            ]),
-        )
+        profile = user_profiles.get(uid, {})
+        # Unverified females → verification popup instead of premium
+        if profile.get('gender') in ('Women', 'Female') and not profile.get('verified'):
+            await message.answer(
+                "⚠️ You've reached your free limit for this match.\n\n"
+                "📸 Verify your profile to continue chatting (free & unlimited).",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_now')],
+                    [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+                ]),
+            )
+        else:
+            await message.answer(
+                "⚠️ You've reached your free limit for this match.\n\n"
+                "💎 Continue at just Rs49 — get unlimited texts & matches for a day!",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+                    [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+                    [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+                ]),
+            )
+        return
+
+    # Check if RECEIVER has reached their text limit — send teaser instead of actual message
+    partner_profile = user_profiles.get(partner, {})
+    if not check_text_limit(partner):
+        increment_text_count(uid)  # Sender used one of their texts
+        # Unverified female → verify teaser; male → premium teaser
+        if partner_profile.get('gender') in ('Women', 'Female') and not partner_profile.get('verified'):
+            try:
+                await bot.send_message(
+                    partner,
+                    f"💬 *New message from {sender_name}*\n\n"
+                    f"📸 Verify your profile to read & reply to messages (free & unlimited).",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_now')],
+                    ]),
+                )
+            except Exception as e:
+                print(f"Relay teaser error: {e}")
+        else:
+            try:
+                await bot.send_message(
+                    partner,
+                    f"💬 *New message from {sender_name}*\n\n"
+                    f"💎 Upgrade to premium to read & reply to all messages!",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="💎 Get 1 Day - Rs49", callback_data='buy_1day')],
+                        [InlineKeyboardButton(text="📋 See More Plans", callback_data='see_more_plans')],
+                    ]),
+                )
+            except Exception as e:
+                print(f"Relay teaser error: {e}")
         return
 
     try:
