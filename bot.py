@@ -140,7 +140,8 @@ _processed_payments: Set[str] = set()
 class Signup(StatesGroup):
     name = State()
     gender_preferred = State()
-    location_photo = State()
+    location = State()
+    photo = State()
 
 class EditProfile(StatesGroup):
     name = State()
@@ -446,99 +447,80 @@ async def h_name(message: types.Message, state: FSMContext):
     await state.set_state(Signup.gender_preferred)
     kb = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-            [KeyboardButton(text='\u2695\ufe0f Other')],
+            [KeyboardButton(text='👨‍👩 Male'), KeyboardButton(text='👩 Female')],
+            [KeyboardButton(text='⚕ Other')],
         ], resize_keyboard=True, one_time_keyboard=True
     )
     msg = await message.answer(
-            "<b>Step 2 of 3</b>\n\n"
-            "\u2696\ufe0f <b>What's your gender?</b>",
-            parse_mode='HTML', reply_markup=kb
-        )
+        "<b>Step 2 of 3</b>\n\n"
+        "⚖️ <b>What's your gender?</b>",
+        parse_mode='HTML', reply_markup=kb
+    )
     await state.update_data(prev_bot_msg=msg.message_id)
+
 
 @dp.message(StateFilter(Signup.gender_preferred))
 async def h_gender_preferred(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     raw = message.text.strip()
-    # Strip emoji prefix (handles ZWJ+skin-tone variants Telegram sends)
-    stripped = raw.lower().lstrip('\U0001f468\u200d\U0001f3fb\U0001f469\u200d\U0001f3fb\U0001f3fb\u200d\U0001f466\u200d\U0001f3fb\u200d\U0001f467\u200d\U0001f3fb\U0001f3eb\U0001f465').lower()
-    keyword = stripped.strip()
+    keyword = raw.lower().lstrip('👨👩⚕🧑👦👧').strip()
 
-    # Normalize responses
-    GENDER_KEYWORDS = {'male': 'Male', 'm': 'Male',
-                       'female': 'Female', 'women': 'Female', 'f': 'Women',
-                       'other': 'Other'}
-    PREF_KEYWORDS = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
+    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
+    PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
 
     d = await state.get_data()
     gender = d.get('gender')
     preferred = d.get('preferred')
 
-    if keyword in GENDER_KEYWORDS and not gender:
-        await state.update_data(gender=GENDER_KEYWORDS[keyword])
+    if keyword in GENDER_KW and not gender:
+        await state.update_data(gender=GENDER_KW[keyword])
         kb2 = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text='\U0001f468 Men'), KeyboardButton(text='\U0001f469 Women')],
-                [KeyboardButton(text='\U0001f465 Everyone')],
+                [KeyboardButton(text='👨 Men'), KeyboardButton(text='👩 Women')],
+                [KeyboardButton(text='👥 Everyone')],
             ], resize_keyboard=True, one_time_keyboard=True
         )
-        msg = await message.answer("\U0001f49d <b>Who are you interested in?</b>", parse_mode='HTML', reply_markup=kb2)
+        msg = await message.answer("💝 <b>Who are you interested in?</b>", parse_mode='HTML', reply_markup=kb2)
         await state.update_data(prev_bot_msg=msg.message_id)
         return
 
-    if keyword in PREF_KEYWORDS and not preferred:
-        await state.update_data(preferred=PREF_KEYWORDS[keyword])
-        if gender:
-            await state.set_state(Signup.location_photo)
-            kb3 = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
-                    [KeyboardButton(text='\u2328\ufe0f  Enter Place Name')],
-                ], resize_keyboard=True, one_time_keyboard=True
-            )
-            msg = await message.answer(
-                "<b>Step 3 of 3</b>\n\n"
-                "\U0001f4cd <b>Share your location</b> or type a place name:\n\n"
-                "\U0001f4f7 <b>Add a photo</b> (optional) — send it now or after.",
-                parse_mode='HTML', reply_markup=kb3
-            )
-            await state.update_data(prev_bot_msg=msg.message_id)
-        else:
-            kb_g = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-        [KeyboardButton(text='\u2695\ufe0f Other')],
-    ], resize_keyboard=True, one_time_keyboard=True
-            )
-            msg = await message.answer(
-    "\u2696\ufe0f <b>What's your gender?</b>",
-    parse_mode='HTML', reply_markup=kb_g
-            )
-            await state.update_data(prev_bot_msg=msg.message_id)
-        return
+    if keyword in PREF_KW and not preferred:
+        await state.update_data(preferred=PREF_KW[keyword])
 
     if gender and preferred:
-        await state.set_state(Signup.location_photo)
+        await state.set_state(Signup.location)
         kb3 = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
-                [KeyboardButton(text='\u2328\ufe0f  Enter Place Name')],
+                [KeyboardButton(text='📍 Share My Location', request_location=True)],
+                [KeyboardButton(text='⌨️  Enter Place Name')],
             ], resize_keyboard=True, one_time_keyboard=True
         )
         msg = await message.answer(
             "<b>Step 3 of 3</b>\n\n"
-            "\U0001f4cd <b>Share your location</b> or type a place name:\n\n"
-            "\U0001f4f7 <b>Add a photo</b> (optional) — send it now or after.",
+            "📍 <b>Share your location</b> or type a place name:",
             parse_mode='HTML', reply_markup=kb3
         )
         await state.update_data(prev_bot_msg=msg.message_id)
         return
 
-    await message.answer("⚠️ Please use the buttons above.")
+    # Still waiting for gender or preferred
+    kb_g = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='👨‍👩 Male'), KeyboardButton(text='👩 Female')],
+            [KeyboardButton(text='⚕ Other')],
+        ], resize_keyboard=True, one_time_keyboard=True
+    )
+    kb2 = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='👨 Men'), KeyboardButton(text='👩 Women')],
+            [KeyboardButton(text='👥 Everyone')],
+        ], resize_keyboard=True, one_time_keyboard=True
+    )
+    await message.answer("⚠️ Please tap a button above.", reply_markup=kb_g if not gender else kb2)
 
-@dp.message(lambda m: m.location, StateFilter(Signup.location_photo))
+
+@dp.message(lambda m: m.location, StateFilter(Signup.location))
 async def h_loc_gps(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
@@ -546,14 +528,33 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     if d.get('prev_bot_msg'):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
     loc = message.location
-    await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
-    await finish_signup(state, message.chat.id, uid)
 
-@dp.message(StateFilter(Signup.location_photo))
+    if d.get('is_editing'):
+        prof = user_profiles.get(uid, {})
+        prof.update({'lat': str(loc.latitude), 'lon': str(loc.longitude), 'location_name': 'GPS'})
+        user_profiles[uid] = prof
+        await save_all()
+        await state.clear()
+        await message.answer("✅ Location updated!")
+        return
+
+    await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
+    await state.set_state(Signup.photo)
+    msg = await message.answer(
+        "📸 <b>Add a photo</b> (optional) — send one now or tap Skip:",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text='⏭ Skip')]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+    )
+    await state.update_data(prev_bot_msg=msg.message_id)
+
+
+@dp.message(StateFilter(Signup.location))
 async def h_loc_text(message: types.Message, state: FSMContext):
     if message.photo:
-        await h_photo(message, state)
-        return
+        return  # Let photo handler take it
     uid = message.from_user.id
     await mark_online(uid)
     d = await state.get_data()
@@ -564,30 +565,54 @@ async def h_loc_text(message: types.Message, state: FSMContext):
         return
     lat, lon = await geocode(text)
     if not lat:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)]],
+        await message.answer("📍 Couldn't find that place. Try a city name or use <b>Share My Location</b>.", parse_mode='HTML')
+        return
+
+    if d.get('is_editing'):
+        prof = user_profiles.get(uid, {})
+        prof.update({'lat': str(lat), 'lon': str(lon), 'location_name': text})
+        user_profiles[uid] = prof
+        await save_all()
+        await state.clear()
+        await message.answer("✅ Location updated!")
+        return
+
+    await state.update_data(lat=str(lat), lon=str(lon), location_name=text)
+    await state.set_state(Signup.photo)
+    msg = await message.answer(
+        "📸 <b>Add a photo</b> (optional) — send one now or tap Skip:",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text='⏭ Skip')]],
             resize_keyboard=True, one_time_keyboard=True
         )
-        await message.answer(
-            "\U0001f4cd Couldn't find that place. Try a city name or use <b>Share My Location</b>.",
-            parse_mode='HTML', reply_markup=kb
-        )
-        return
-    await state.update_data(lat=str(lat), lon=str(lon), location_name=text)
-    await finish_signup(state, message.chat.id, uid)
+    )
+    await state.update_data(prev_bot_msg=msg.message_id)
 
-@dp.message(StateFilter(Signup.location_photo))
+
+
+
+
+@dp.message(StateFilter(Signup.photo))
 async def h_photo(message: types.Message, state: FSMContext):
-    if not message.photo:
-        return
     uid = message.from_user.id
     await mark_online(uid)
     d = await state.get_data()
+    if d.get('prev_bot_msg'):
+        await safe_delete(message.chat.id, d['prev_bot_msg'])
+
+    if message.text and 'skip' in message.text.lower():
+        await finish_signup(state, message.chat.id, uid)
+        return
+
+    if not message.photo:
+        await message.answer("📸 Send a photo or tap Skip.")
+        return
+
     photo_id = message.photo[-1].file_id
     await state.update_data(photo=photo_id)
-    await message.answer("\u2705 Photo saved! You can change it anytime in your profile.")
-    if d.get('lat') and d.get('lon'):
-        await finish_signup(state, message.chat.id, uid)
+    await finish_signup(state, message.chat.id, uid)
+
 
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     data = await state.get_data()
@@ -1365,7 +1390,8 @@ async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
 async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
-    await state.set_state(Signup.location_photo)
+    await state.set_state(Signup.location)
+    await state.update_data(is_editing=True)
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
