@@ -553,14 +553,17 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
             ),
         )
     elif step == 'confirm':
-        data = await state.get_data()
+        new_data = await state.get_data()
         uid  = user_id
-        user_profiles[uid] = _clean(data)
+        # Merge: existing profile fields stay, new data (edit_mode stripped) overrides
+        existing = user_profiles.get(uid, {})
+        merged = _clean({**existing, **new_data})
+        user_profiles[uid] = merged
         await state.clear()
 
         await bot.send_message(
             chat_id,
-            "🎉 *Profile complete!*\n\n" + profile_summary(data) +
+            "🎉 *Profile complete!*\n\n" + profile_summary(merged) +
             "\nDoes everything look right?",
             parse_mode='Markdown',
             reply_markup=profile_kb(),
