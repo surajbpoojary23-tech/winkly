@@ -1118,11 +1118,9 @@ async def start_chat(cb: types.CallbackQuery):
     partner_name = user_profiles[partner]['name']
     await cb.message.edit_text(
         f"💬 *Chat started with {partner_name}*\n\n"
-        "Send your messages below. You can tap 'Skip' to end this chat early or 'End Chat' to finish.\n\n"
-        "💡 *Pro tip:* Type 'skip' anytime to find someone new!",
+        "Send your messages below. Tap below to end this chat when you're finished.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭️  Skip", callback_data=f'skip_chat:{partner}')],
             [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
         ]),
     )
@@ -1131,60 +1129,16 @@ async def start_chat(cb: types.CallbackQuery):
     await bot.send_message(
         partner,
         f"💬 *{user_profiles[uid]['name']}* started chatting!\n\n"
-        "You can tap 'Skip' to end this chat early or 'End Chat' to finish.",
+        "You can end this chat when you're finished.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭️  Skip", callback_data=f'skip_chat:{uid}')],
             [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{uid}')],
         ]),
     )
     await cb.answer()
 
 
-@dp.callback_query(lambda cb: cb.data.startswith('skip_chat:'))
-async def skip_chat(cb: types.CallbackQuery):
-    """Skip the current chat and return to profile."""
-    uid = cb.from_user.id
-    partner = int(cb.data.split(':')[1])
 
-    # Remove from active matches
-    if uid in active_matches and partner in active_matches[uid]:
-        del active_matches[uid][partner]
-    if partner in active_matches and uid in active_matches[partner]:
-        del active_matches[partner][uid]
-    
-    # Remove from chat tracking
-    if uid in current_chat:
-        del current_chat[uid]
-    if partner in current_chat:
-        del current_chat[partner]
-    
-    # Notify both users
-    await cb.message.edit_text(
-        "⏭️ *Chat skipped.*\n\n"
-        "You can start searching for someone new.\n\n"
-        "Tap below to find matches:",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-            [InlineKeyboardButton(text="👤  View Profile", callback_data='back_to_profile')],
-        ]),
-    )
-    
-    try:
-        await bot.send_message(
-            partner,
-            f"⏭️ *{user_profiles[uid]['name']}* ended the chat early.\n\n"
-            "You can start searching for someone new.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-            ]),
-        )
-    except:
-        pass
-    
-    await cb.answer("Chat skipped")
 
 
 @dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
@@ -1199,11 +1153,10 @@ async def end_chat_handler(cb: types.CallbackQuery):
         del current_chat[partner]
 
     await cb.message.edit_text("🔚 *Chat ended.*\n\n"
-                               "You can find someone new or view your profile.",
+                               "You can find someone new.",
                                parse_mode='Markdown',
                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                                    [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
-                                   [InlineKeyboardButton(text="👤  View Profile", callback_data='back_to_profile')],
                                ]))
 
     # Also tell the partner
