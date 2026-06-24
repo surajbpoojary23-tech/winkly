@@ -40,8 +40,16 @@ class Setup(StatesGroup):
 
 
 # ── In-memory profile store ───────────────────────────────────────────────────
-# {user_id: {"name":…, "age":…, "gender":…, "bio":…, "lat":…, "lon":…}}
+# {user_id: {"name":…, "age":…, "gender":…, "bio":…, "lat":…, "lon":…, "likes": set(), "rejected": set()}}
 user_profiles: dict = {}
+
+# ── Match & Chat stores ─────────────────────────────────────────────────────
+# likes_sent: {liker_id: set(liked_ids)}
+likes_sent: dict[int, set] = {}
+# matches: {user_id: {partner_id: match_data}}
+active_matches: dict[int, dict[int, dict]] = {}
+# current_chat: {user_id: partner_id} — tracks who each user is chatting with
+current_chat: dict[int, int] = {}
 
 PROGRESS_STEPS = ["name", "age", "gender", "bio", "preferred_gender", "location"]
 TOTAL_STEPS = 6
@@ -660,13 +668,16 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
 
 # ── Review screen interactions ─────────────────────────────────────────────────
 
+# Store last shown matches per user for Like/Reject navigation
+_LAST_MATCHES: dict[int, list] = {}
+
 @dp.callback_query(lambda cb: cb.data == 'do_match')
 async def do_match(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await cb.message.edit_reply_markup(reply_markup=None)
 
     if uid not in user_profiles:
-        await cb.message.answer("⚠️ No profile found. Sending /start to set one up.")
+        await cb.message.answer("⚠️ No profile found. Send /start to set one up.")
         await cb.answer()
         return
 
@@ -682,34 +693,197 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer()
         return
 
-    # Build match cards — up to 5 at a time
-    cards = matches[:5]
-    await cb.message.answer(
-        f"❤️ *{len(matches)} match{'es' if len(matches) != 1 else ''} found!* Nearest to you:\n\n"
-        + "\n\n".join(
-            f"• *{m['name']}*, {m['age']} — 📍 {m['distance_km']} km away"
-            + (f"\n  _{m.get('bio', '')[:80]}_" if m.get('bio') else "")
-            for m in cards
-        ),
-        parse_mode='Markdown',
-    )
+    # Cache matches and show first one with Like/Skip
+    _LAST_MATCHES[uid] = matches
+    await _show_next_match(cb.message, uid, 0)
+    await cb.answer()
 
-    # Show first match's profile inline
-    top = cards[0]
-    await cb.message.answer(
-        "👤 *Top Match*\n\n"
-        f"📛  {top.get('name', '—')}\n"
-        f"🎂  Age: {top.get('age', '—')}\n"
-        f"⚧  {top.get('gender', '—')}\n"
-        f"📝  {top.get('bio', '—') or '—'}\n"
-        f"📍  {top.get('distance_km', '?')} km away",
+
+async def _show_next_match(message, uid: int, idx: int):
+    matches = _LAST_MATCHES.get(uid, [])
+    if idx >= len(matches):
+        await message.answer(
+            "🎉 That's everyone nearby! Check back later.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Search Again", callback_data='do_match')],
+            ]),
+        )
+        return
+
+    m = matches[idx]
+    # Check already liked/rejected
+    if uid in likes_sent and m['uid'] in likes_sent[uid]:
+        await _show_next_match(message, uid, idx + 1)
+        return
+
+    # Track this display context
+    user_profiles[uid]['_current_match_idx'] = idx
+    user_profiles[uid]['_current_match_uid'] = m['uid']
+
+    bio_line = f"\n📝  {m.get('bio', '')[:100]}" if m.get('bio') else ""
+    await message.answer(
+        f"👤 *{m['name']}*\n"
+        f"🎂  Age: {m['age']}  |  ⚧ {m['gender']}\n"
+        f"📍  {m['distance_km']} km away{bio_line}",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❤️  Show More Matches", callback_data='show_more_matches')],
-            [InlineKeyboardButton(text="🔄  Search Again", callback_data='do_match')],
+            [InlineKeyboardButton(text="❤️  Like", callback_data=f'like:{m["uid"]}'),
+             InlineKeyboardButton(text="❌  Skip", callback_data=f'skip:{m["uid"]}')],
+            [InlineKeyboardButton(text="⬇️  More matches", callback_data='show_more_matches')],
+        ]),
+    )
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('like:'))
+async def handle_like(cb: types.CallbackQuery):
+    liker = cb.from_user.id
+    liked = int(cb.data.split(':')[1])
+
+    if liker not in likes_sent:
+        likes_sent[liker] = set()
+    likes_sent[liker].add(liked)
+
+    # Check for mutual like
+    if liked in likes_sent and liker in likes_sent.get(liked, set()):
+        # Mutual match! Establish match
+        if liker not in active_matches:
+            active_matches[liker] = {}
+        if liked not in active_matches:
+            active_matches[liked] = {}
+
+        # Store match metadata
+        active_matches[liker][liked] = {'status': 'matched'}
+        active_matches[liked][liker] = {'status': 'matched'}
+
+        # Notify both users about the mutual match
+        _L = user_profiles[liker]
+        _R = user_profiles[liked]
+
+        await bot.send_message(
+            liker,
+            f"🎉 *It's a Match!*\n\n"
+            f"You and *{_R['name']}* liked each other!\n\n"
+            f"📛  {_R['name']}\n"
+            f"🎂  {_R['age']}  |  ⚧ {_R['gender']}\n"
+            f"📝  {_R.get('bio', '') or '—'}\n\n"
+            "Tap below to start chatting:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{liked}')],
+            ]),
+        )
+
+        await bot.send_message(
+            liked,
+            f"🎉 *It's a Match!*\n\n"
+            f"You and *{_L['name']}* liked each other!\n\n"
+            f"📛  {_L['name']}\n"
+            f"🎂  {_L['age']}  |  ⚧ {_L['gender']}\n"
+            f"📝  {_L.get('bio', '') or '—'}\n\n"
+            "Tap below to start chatting:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{liker}')],
+            ]),
+        )
+    else:
+        # One-sided like — send a subtle acknowledgment
+        await bot.send_message(liker, "❤️ Liked! If they like you back, it's a match.")
+
+    # Show next match
+    me = user_profiles[liker]
+    current_idx = me.get('_current_match_idx', 0)
+    await cb.answer()
+    await _show_next_match(cb.message, liker, current_idx + 1)
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('skip:'))
+async def handle_skip(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    skipped = int(cb.data.split(':')[1])
+
+    # Track rejection to avoid re-showing
+    user_profiles[uid].setdefault('rejected', set()).add(skipped)
+
+    me = user_profiles[uid]
+    current_idx = me.get('_current_match_idx', 0)
+    await cb.answer("Skipped")
+    await _show_next_match(cb.message, uid, current_idx + 1)
+
+
+# ── Chat system ───────────────────────────────────────────────────────────────
+
+@dp.callback_query(lambda cb: cb.data.startswith('chat:'))
+async def start_chat(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    partner = int(cb.data.split(':')[1])
+
+    # Verify mutual match
+    if uid not in active_matches or partner not in active_matches.get(uid, {}):
+        await cb.answer("⚠️ You are not matched with this user.", show_alert=True)
+        return
+
+    current_chat[uid] = partner
+    current_chat[partner] = uid  # Bidirectional
+
+    partner_name = user_profiles[partner]['name']
+    await cb.message.edit_text(
+        f"💬 *Chat started with {partner_name}*\n\n"
+        "Send your messages below. Tap 'End Chat' to leave.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
+        ]),
+    )
+
+    # Also tell the partner
+    await bot.send_message(
+        partner,
+        f"💬 *{user_profiles[uid]['name']}* started chatting!\n",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{uid}')],
         ]),
     )
     await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
+async def end_chat_handler(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    partner = int(cb.data.split(':')[1])
+
+    # Remove chat tracking
+    current_chat.pop(uid, None)
+    current_chat.pop(partner, None)
+
+    await cb.message.edit_text("🔚 *Chat ended.*")
+    await bot.send_message(partner, f"🔚 *{user_profiles[uid]['name']} ended the chat.*")
+    await cb.answer()
+
+
+# ── Message relay (the core chat feature) ───────────────────────────────────
+
+@dp.message()
+async def relay_message(message: types.Message):
+    uid = message.from_user.id
+
+    # Check if this user is in an active chat
+    if uid not in current_chat:
+        # Not in chat — ignore or show help
+        return
+
+    partner = current_chat[uid]
+    partner_name = user_profiles.get(partner, {}).get('name', 'Someone')
+
+    try:
+        # Copy the full message (preserves formatting, photos, etc.)
+        await bot.copy_message(partner, message.chat.id, message.message_id)
+        # Optional: show delivered checkmark
+        # await message.react([types.ReactionTypeEmoji(emoji='✅')])
+    except Exception as e:
+        await message.answer(f"⚠️ Couldn't deliver your message. They may have blocked the bot.")
+        print(f"Relay error: {e}")
 
 
 # ── Show more matches ──────────────────────────────────────────────────────────
@@ -756,8 +930,49 @@ async def show_more_matches(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-# ── /profile command (show current profile) ────────────────────────────────────
+# ── /chat command ─────────────────────────────────────────────────────────────
 
+@dp.message(Command('chat'))
+async def cmd_chat(message: types.Message):
+    uid = message.from_user.id
+    if uid not in user_profiles:
+        await message.answer("📝 You haven't set up a profile yet.\n\nSend /start to begin!")
+        return
+    
+    # Check if they have active matches
+    if uid not in active_matches or not active_matches[uid]:
+        await message.answer(
+            "💬 *No matches yet.*\n\n"
+            "Send /find to look for matches, or /profile to review your profile.",
+            parse_mode='Markdown',
+        )
+        return
+    
+    # Show list of active matches they can chat with
+    match_buttons = []
+    for pid, _ in active_matches[uid].items():
+        if pid in user_profiles:
+            match_buttons.append(InlineKeyboardButton(
+                text=f"💬 Chat with {user_profiles[pid]['name']}",
+                callback_data=f"chat:{pid}",
+            ))
+    
+    if not match_buttons:
+        await message.answer(
+            "💬 *No active matches found.*\n\nSend /find to look for matches!",
+            parse_mode='Markdown',
+        )
+        return
+    
+    await message.answer(
+        "💬 *Your Matches*\n\nTap to start chatting:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[match_buttons]),
+    )
+
+
+# ── /profile command (show current profile) ────────────────────────────────────
+# ── Profile command ──
 @dp.message(Command('profile'))
 async def cmd_profile(message: types.Message):
     uid = message.from_user.id
@@ -765,10 +980,22 @@ async def cmd_profile(message: types.Message):
         await message.answer("📝 You haven't set up a profile yet.\n\nSend /start to begin!")
         return
     data = user_profiles[uid]
+    # Check for active matches to show chat button
+    kb_buttons = []
+    if uid in active_matches and active_matches[uid]:
+        matches_info = []
+        for pid, _ in active_matches[uid].items():
+            if pid in user_profiles:
+                matches_info.append(InlineKeyboardButton(
+                    text=f"💬 Chat with {user_profiles[pid]['name']}",
+                    callback_data=f"chat:{pid}",
+                ))
+        kb_buttons.append(matches_info)
+
     await message.answer(
         profile_summary(data) + "\n_Use the buttons below to edit any field._",
         parse_mode='Markdown',
-        reply_markup=profile_kb(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_buttons) if kb_buttons else profile_kb(),
     )
 
 
