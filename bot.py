@@ -534,6 +534,7 @@ async def h_preferred(message: types.Message, state: FSMContext):
     await state.update_data(prev_bot_msg=msg.message_id)
 
 
+@dp.message(lambda m: m.location, StateFilter(Signup.location))
 async def h_loc_gps(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
