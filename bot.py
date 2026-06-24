@@ -623,8 +623,16 @@ async def on_startup(dispatcher: Dispatcher):
         await bot.set_webhook(WEBHOOK_URL)
         print(f"Webhook set to {WEBHOOK_URL}")
         from aiogram.webhook.aiohttp_server import SimpleRequestHandler
-        handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
         app = web.Application()
+
+        # Health check endpoint — Render health checker sends GET /health
+        async def health(request):
+            return web.Response(text='OK', status=200)
+
+        app.router.add_get('/health', health)
+        app.router.add_post('/health', health)
+
+        handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
         handler.register(app, path='/')
         runner = web.AppRunner(app)
         await runner.setup()
