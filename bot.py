@@ -626,15 +626,38 @@ import aiohttp
 
 async def geocode_place(place_name: str):
     """Convert place name to lat/lon using OpenStreetMap Nominatim (free, no API key)."""
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": place_name, "format": "json", "limit": 1}
-    headers = {"User-Agent": "WinklyBot/1.0"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=headers, timeout=10) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if data:
-                    return float(data[0]["lat"]), float(data[0]["lon"])
+    # Common city coordinates as fallback (approximate)
+    common_cities = {
+        'bangalore': (12.9716, 77.5946),
+        'bengaluru': (12.9716, 77.5946),
+        'mumbai': (19.0760, 72.8777),
+        'delhi': (28.6139, 77.2090),
+        'chennai': (13.0827, 80.2707),
+        'kolkata': (22.5726, 88.3639),
+        'hyderabad': (17.3850, 78.4867),
+        'pune': (18.5204, 73.8567),
+        'ahmedabad': (23.0225, 72.5714),
+    }
+    
+    # Check lowercase for common cities
+    normalized = place_name.lower().strip()
+    if normalized in common_cities:
+        return common_cities[normalized]
+    
+    # Try Nominatim API
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {"q": place_name, "format": "json", "limit": 1}
+        headers = {"User-Agent": "WinklyBot/1.0"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data:
+                        return float(data[0]["lat"]), float(data[0]["lon"])
+    except Exception:
+        pass
+    
     return None, None
 
 
@@ -654,9 +677,11 @@ async def handle_location_text(message: types.Message, state: FSMContext):
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
         return
 
-    # If geocoding fails, show options
+    # If geocoding fails, show options with helpful suggestions
     await message.answer(
-        "📍 Couldn't find that place. Try again, or use the buttons below:",
+        "📍 Couldn't find that place. Try again, or use the buttons below:\n\n"
+        "💡 *Tip:* Try common city names like 'Bangalore', 'Mumbai', 'Delhi', 'Chennai', or use 'Share My Location' for GPS.\n\n"
+        "You can also try the full name with state/country (e.g., 'Bengaluru, Karnataka, India').",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text='📍 Share My Location', request_location=True)],
