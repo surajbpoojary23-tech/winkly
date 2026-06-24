@@ -8,6 +8,7 @@ import math
 import os
 import random
 import re
+import unicodedata
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
@@ -467,10 +468,9 @@ async def h_gender_preferred(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     raw = message.text.strip()
-    import re, unicodedata
-    # Fully normalize: decompose emoji, strip variation selectors and ZWJ chars, keep only text
-    normalized = unicodedata.normalize('NFD', raw.lower())
-    keyword = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').strip()
+    # Strip all emoji/ZWJ/variation selectors, keep only text
+    nfd = unicodedata.normalize('NFD', raw.lower())
+    keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
 
     GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
     PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
@@ -1454,10 +1454,9 @@ async def edit_gender_preferred_h(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     raw = message.text.strip()
-    import re, unicodedata
-    # Fully normalize: decompose emoji, strip variation selectors and ZWJ chars, keep only text
-    normalized = unicodedata.normalize('NFD', raw.lower())
-    keyword = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').strip()
+    # Strip all emoji/ZWJ/variation selectors, keep only text
+    nfd = unicodedata.normalize('NFD', raw.lower())
+    keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
 
     GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
     PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
