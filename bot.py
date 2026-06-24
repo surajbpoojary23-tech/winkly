@@ -363,7 +363,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "📛 *What's your name?*",
         parse_mode='Markdown',
     )
-    await state.update_data(last_bot_msg_id=msg.message_id)
+    await state.update_data(last_bot_msg_id=msg.message_id, start_msg_id=message.message_id)
 
 
 # ── /cancel ───────────────────────────────────────────────────────────────────
@@ -475,8 +475,10 @@ async def edit_field(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Setup.name))
 async def handle_name(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('start_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     try:
         name = message.text.strip()
         if len(name) < 2:
@@ -485,11 +487,13 @@ async def handle_name(message: types.Message, state: FSMContext):
         await state.update_data(name=name)
 
         data = await state.get_data()
+        next_state = Setup.age
         if data.get('edit_mode'):
             await state.update_data(edit_mode=False)
-            await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
-        else:
-            await advance_to(state, Setup.age, message.chat.id, message.from_user.id)
+            next_state = Setup.confirm
+
+        await state.update_data(prev_bot_msg_id=data.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
+        await advance_to(state, next_state, message.chat.id, message.from_user.id)
     except Exception as e:
         import traceback
         await message.answer(f"⚠️ Error: {e}")
@@ -560,8 +564,9 @@ def calc_age(born: date) -> int:
 
 @dp.message(StateFilter(Setup.age))
 async def handle_dob(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     raw = message.text.strip()
     dob = parse_dob(raw)
     if dob is None:
@@ -582,19 +587,22 @@ async def handle_dob(message: types.Message, state: FSMContext):
     await state.update_data(age=str(age), dob=str(dob))
 
     data = await state.get_data()
+    next_state = Setup.gender
     if data.get('edit_mode'):
         await state.update_data(edit_mode=False)
-        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
-    else:
-        await advance_to(state, Setup.gender, message.chat.id, message.from_user.id)
+        next_state = Setup.confirm
+
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
+    await advance_to(state, next_state, message.chat.id, message.from_user.id)
 
 
 # ── Gender ────────────────────────────────────────────────────────────────────
 
 @dp.message(StateFilter(Setup.gender))
 async def handle_gender(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     raw = message.text.strip().lower()
     exact_map = {
         '👨 male': 'Male', '👩 female': 'Female', '⚧ other': 'Other',
@@ -616,16 +624,20 @@ async def handle_gender(message: types.Message, state: FSMContext):
     await state.update_data(gender=gender)
 
     data = await state.get_data()
+    next_state = Setup.bio
     if data.get('edit_mode'):
         await state.update_data(edit_mode=False)
-        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
-    else:
-        await advance_to(state, Setup.bio, message.chat.id, message.from_user.id)
+        next_state = Setup.confirm
+
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
+    await advance_to(state, next_state, message.chat.id, message.from_user.id)
 
 
 @dp.callback_query(lambda cb: cb.data.startswith('gender_'), StateFilter(Setup.gender))
 async def handle_gender_btn(cb: types.CallbackQuery, state: FSMContext):
-    await safe_delete_msg(cb.message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    d = await state.get_data()
+    await safe_delete_msg(cb.message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(cb.message.chat.id, d.get('last_user_msg_id'))
     raw = cb.data.replace('gender_', '').lower()
     gender_map = {'male': 'Male', 'female': 'Female', 'other': 'Other', 'm': 'Male', 'f': 'Female'}
     gender = gender_map.get(raw, raw.title())
@@ -634,28 +646,33 @@ async def handle_gender_btn(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
     data = await state.get_data()
+    next_state = Setup.bio
     if data.get('edit_mode'):
-        await advance_to(state, Setup.confirm, cb.message.chat.id, cb.from_user.id)
-    else:
-        await advance_to(state, Setup.bio, cb.message.chat.id, cb.from_user.id)
+        await state.update_data(edit_mode=False)
+        next_state = Setup.confirm
+
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'))
+    await advance_to(state, next_state, cb.message.chat.id, cb.from_user.id)
 
 
 # ── Bio ───────────────────────────────────────────────────────────────────────
 
 @dp.message(StateFilter(Setup.bio))
 async def handle_bio(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     raw = message.text.strip()
 
     if raw.lower() in ('/skip', 'skip'):
         await state.update_data(bio="")
         data = await state.get_data()
+        next_state = Setup.preferred_gender
         if data.get('edit_mode'):
             await state.update_data(edit_mode=False)
-            await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
-        else:
-            await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
+            next_state = Setup.confirm
+        await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
+        await advance_to(state, next_state, message.chat.id, message.from_user.id)
         return
 
     if len(raw) < 10:
@@ -664,34 +681,41 @@ async def handle_bio(message: types.Message, state: FSMContext):
     await state.update_data(bio=raw)
 
     data = await state.get_data()
+    next_state = Setup.preferred_gender
     if data.get('edit_mode'):
         await state.update_data(edit_mode=False)
-        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
-    else:
-        await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
+        next_state = Setup.confirm
+
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
+    await advance_to(state, next_state, message.chat.id, message.from_user.id)
 
 
 @dp.callback_query(lambda cb: cb.data == 'skip_bio', StateFilter(Setup.bio))
 async def skip_bio(cb: types.CallbackQuery, state: FSMContext):
-    await safe_delete_msg(cb.message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
+    d = await state.get_data()
+    await safe_delete_msg(cb.message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(cb.message.chat.id, d.get('last_user_msg_id'))
+    await safe_delete_msg(cb.message.chat.id, cb.message.message_id)
     await state.update_data(bio="")
-    await cb.message.edit_text("📝 *Bio skipped.*")
     await cb.answer()
 
     data = await state.get_data()
+    next_state = Setup.preferred_gender
     if data.get('edit_mode'):
         await state.update_data(edit_mode=False)
-        await advance_to(state, Setup.confirm, cb.message.chat.id, cb.from_user.id)
-    else:
-        await advance_to(state, Setup.preferred_gender, cb.message.chat.id, cb.from_user.id)
+        next_state = Setup.confirm
+
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'))
+    await advance_to(state, next_state, cb.message.chat.id, cb.from_user.id)
 
 
 # ── Preferred Gender ─────────────────────────────────────────────────────────
 
 @dp.message(StateFilter(Setup.preferred_gender))
 async def handle_preferred_gender(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     raw = message.text.strip().lower()
     exact_map = {
         '👨 men': 'Men', '👩 women': 'Women', '👥 everyone': 'Everyone',
@@ -717,11 +741,13 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
     await state.update_data(preferred_gender=pref)
 
     data = await state.get_data()
+    next_state = Setup.location
     if data.get('edit_mode'):
         await state.update_data(edit_mode=False)
-        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
-    else:
-        await advance_to(state, Setup.location, message.chat.id, message.from_user.id)
+        next_state = Setup.confirm
+
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
+    await advance_to(state, next_state, message.chat.id, message.from_user.id)
 
 
 # ── Location ──────────────────────────────────────────────────────────────────
@@ -767,13 +793,15 @@ async def geocode_place(place_name: str):
 
 @dp.message(lambda m: not m.location, StateFilter(Setup.location))
 async def handle_location_text(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     text = message.text.strip()
 
     lat, lon = await geocode_place(text)
     if lat and lon:
         await state.update_data(lat=str(lat), lon=str(lon))
+        await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
         await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
         return
 
@@ -793,10 +821,12 @@ async def handle_location_text(message: types.Message, state: FSMContext):
 
 @dp.message(lambda m: m.location, StateFilter(Setup.location))
 async def handle_location_ok(message: types.Message, state: FSMContext):
-    await safe_delete_msg(message.chat.id, (await state.get_data()).get('last_bot_msg_id'))
-    await safe_delete_msg(message.chat.id, message.message_id)
+    d = await state.get_data()
+    await safe_delete_msg(message.chat.id, d.get('prev_bot_msg_id'))
+    await safe_delete_msg(message.chat.id, d.get('last_user_msg_id'))
     loc = message.location
     await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude))
+    await state.update_data(prev_bot_msg_id=d.get('last_bot_msg_id'), last_user_msg_id=message.message_id)
     await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
 
 
