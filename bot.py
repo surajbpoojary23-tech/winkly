@@ -1392,32 +1392,17 @@ async def say_hi(cb: types.CallbackQuery):
         # Update the chat interface to show the 'Hi' was sent
         await cb.message.edit_text(
             f"💬 *Chat started with {partner_name}*\n\n"
-            "Send your messages below. Tap below to say 'Hi' or end the chat.\n\n"
+            "Send your messages below. Tap below to say 'Hi'.\n\n"
             "👋 *You said: Hi!*",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="👋 Say Hi", callback_data=f'say_hi:{partner}')],
-                [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
             ]),
         )
         
         await cb.answer("Hi sent!")
     except Exception as e:
         await cb.answer("⚠️ Couldn't send the message. They may have blocked the bot.")
-
-
-@dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
-async def end_chat_handler(cb: types.CallbackQuery):
-    uid = cb.from_user.id
-    partner = int(cb.data.split(':')[1])
-
-    # Remove chat tracking
-    current_chat.pop(uid, None)
-    current_chat.pop(partner, None)
-
-    await cb.message.edit_text("🔚 *Chat ended.*")
-    await bot.send_message(partner, f"🔚 *{user_profiles[uid]['name']} ended the chat.*")
-    await cb.answer()
 
 
 # ── Message relay (the core chat feature) ────────────────────────────────────
