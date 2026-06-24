@@ -379,9 +379,22 @@ async def handle_name(message: types.Message, state: FSMContext):
 # ── DOB → calculate age ─────────────────────────────────────────────────────────
 
 from datetime import date
+import re
 
 def parse_dob(raw: str):
-    """Return date object or None. Accepts DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY."""
+    """Return date object or None. Accepts many formats."""
+    raw = raw.strip()
+    
+    # YYYY-MM-DD (ISO) - check FIRST to avoid confusion with DD-MM-YYYY
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', raw):
+        y, m, d = raw.split('-')
+        return date(int(y), int(m), int(d))
+    
+    # DDMMYYYY (compact)
+    if re.match(r'^\d{8}$', raw):
+        return date(int(raw[4:8]), int(raw[2:4]), int(raw[0:2]))
+    
+    # DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
     for sep in ('/', '-', '.'):
         if sep in raw:
             parts = raw.split(sep)
@@ -389,6 +402,29 @@ def parse_dob(raw: str):
                 d, m, y = parts
                 if len(y) == 4 and y.isdigit():
                     return date(int(y), int(m), int(d))
+                if len(y) == 2 and y.isdigit():
+                    y = int(y) + (2000 if int(y) < 30 else 1900)
+                    return date(y, int(m), int(d))
+    
+    # Month name: "15 Aug 1995", "15 August 1995", "Aug 15 1995"
+    month_map = {
+        'jan':1,'january':1,'feb':2,'february':2,'mar':3,'march':3,'apr':4,'april':4,
+        'may':5,'jun':6,'june':6,'jul':7,'july':7,'aug':8,'august':8,'sep':9,'september':9,
+        'oct':10,'october':10,'nov':11,'november':11,'dec':12,'december':12
+    }
+    parts = re.split(r'[\s,]+', raw)
+    for i, part in enumerate(parts):
+        if part.lower() in month_map:
+            m = month_map[part.lower()]
+            for d_part in parts:
+                if d_part.isdigit() and 1 <= int(d_part) <= 31 and d_part != str(m):
+                    for y_part in parts:
+                        if y_part.isdigit() and len(y_part) in (2, 4) and y_part != d_part:
+                            y = int(y_part)
+                            if len(y_part) == 2:
+                                y = y + (2000 if y < 30 else 1900)
+                            return date(y, m, int(d_part))
+    
     return None
 
 
@@ -406,8 +442,12 @@ async def handle_dob(message: types.Message, state: FSMContext):
     dob = parse_dob(raw)
     if dob is None:
         await message.answer(
-            "⚠️ Enter your date of birth in *DD / MM / YYYY* format.\n"
-            "Example: *15 / 08 / 1995*",
+            "⚠️ Enter your date of birth in one of these formats:\n"
+            "• *DD/MM/YYYY* or *DD-MM-YYYY* or *DD.MM.YYYY* (e.g. `15/08/1995`)\n"
+            "• *DD/MM/YY* (e.g. `15/08/95`)\n"
+            "• *YYYY-MM-DD* (e.g. `1995-08-15`)\n"
+            "• *DDMMYYYY* (e.g. `15081995`)\n"
+            "• *Month name* (e.g. `15 Aug 1995`, `August 15, 1995`)",
             parse_mode='Markdown',
         )
         return
@@ -480,11 +520,24 @@ async def handle_gender_btn(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Setup.bio))
 async def handle_bio(message: types.Message, state: FSMContext):
-    bio = message.text.strip()
-    if len(bio) < 10:
-        await message.answer("⚠️ Please write at least a sentence or two:")
+    raw = message.text.strip()
+    
+    # Allow /skip or "skip" as text command
+    if raw.lower() in ('/skip', 'skip'):
+        await state.update_data(bio="")
+        await message.answer("📝 *Bio skipped.*")
+        data = await state.get_data()
+        if data.get('edit_mode'):
+            await state.update_data(edit_mode=False)
+            await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+        else:
+            await advance_to(state, Setup.preferred_gender, message.chat.id, message.from_user.id)
         return
-    await state.update_data(bio=bio)
+    
+    if len(raw) < 10:
+        await message.answer("⚠️ Please write at least a sentence or two (or type /skip):")
+        return
+    await state.update_data(bio=raw)
     await message.answer("📝 *Bio saved!*")
 
     data = await state.get_data()
