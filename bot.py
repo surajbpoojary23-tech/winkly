@@ -1237,33 +1237,7 @@ async def start_chat(cb: types.CallbackQuery):
 
 
 
-@dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
-async def end_chat_handler(cb: types.CallbackQuery):
-    uid = cb.from_user.id
-    partner = int(cb.data.split(':')[1])
 
-    # Remove from chat tracking
-    if uid in current_chat:
-        del current_chat[uid]
-    if partner in current_chat:
-        del current_chat[partner]
-
-    await cb.message.edit_text("🔚 *Chat ended.*\n\n"
-                               "You can find someone new.",
-                               parse_mode='Markdown')
-
-    # Also tell the partner
-    try:
-        await bot.send_message(
-            partner,
-            f"🔚 *{user_profiles[uid]['name']}* ended the chat.\n\n"
-            "You can find someone new.",
-            parse_mode='Markdown',
-        )
-    except:
-        pass
-    
-    await cb.answer()
 
 
 @dp.callback_query(lambda cb: cb.data == 'upgrade_premium')
