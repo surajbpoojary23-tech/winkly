@@ -146,6 +146,9 @@ class Signup(StatesGroup):
 class EditProfile(StatesGroup):
     name = State()
     bio = State()
+    gender_preferred = State()
+    location = State()
+    photo = State()
 
 GENDER_NORM = {'male':'Men','female':'Women','other':'Other','men':'Men','women':'Women','m':'Men','f':'Women',
                '\u1f468\u200d\U0001f3fb':'Men','\u0001f469\u200d\U0001f3fb':'Women','\u2695\ufe0f':'Other',
@@ -1373,15 +1376,16 @@ async def edit_b(cb: types.CallbackQuery, state: FSMContext):
 async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
-    await state.set_state(Signup.gender_preferred)
+    await state.set_state(EditProfile.gender_preferred)
     kb = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-            [KeyboardButton(text='\u2695\ufe0f Other')],
+            [KeyboardButton(text='👨\u200d👩 Male'), KeyboardButton(text='👩 Female')],
+            [KeyboardButton(text='⚕ Other')],
         ], resize_keyboard=True, one_time_keyboard=True
     )
     await cb.message.edit_text(
-        "\u270f\ufe0f <b>Edit Gender/Interested</b>\n\n\u2696\ufe0f <b>What's your gender?</b>",
+        "\u270f\ufe0f <b>Edit Gender/Interested</b>\n\n"
+        "⚖️ <b>What's your gender?</b>",
         parse_mode='HTML', reply_markup=kb
     )
     await cb.answer()
@@ -1390,8 +1394,7 @@ async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
 async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
-    await state.set_state(Signup.location)
-    await state.update_data(is_editing=True)
+    await state.set_state(EditProfile.location)
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
@@ -1442,6 +1445,96 @@ async def edit_bio_h(message: types.Message, state: FSMContext):
     await message.answer("\u2705 Bio updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
     ]))
+
+@dp.message(StateFilter(EditProfile.gender_preferred))
+async def edit_gender_preferred_h(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    await mark_online(uid)
+    raw = message.text.strip()
+    keyword = raw.lower().lstrip('👨👩⚕🧑👦👧').strip()
+
+    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Women', 'other': 'Other'}
+    PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
+
+    d = await state.get_data()
+    gender = d.get('gender')
+    preferred = d.get('preferred')
+
+    if keyword in GENDER_KW and not gender:
+        await state.update_data(gender=GENDER_KW[keyword])
+        kb2 = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text='👨 Men'), KeyboardButton(text='👩 Women')],
+                [KeyboardButton(text='👥 Everyone')],
+            ], resize_keyboard=True, one_time_keyboard=True
+        )
+        await message.answer("💝 <b>Who are you interested in?</b>", parse_mode='HTML', reply_markup=kb2)
+        return
+
+    if keyword in PREF_KW and not preferred:
+        await state.update_data(preferred=PREF_KW[keyword])
+
+    if gender and preferred:
+        user_profiles[uid]['gender'] = gender
+        user_profiles[uid]['preferred_gender'] = preferred
+        await save_all()
+        await state.clear()
+        await message.answer("✅ Gender preferences updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+        ]))
+        return
+
+    kb_g = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='👨\u200d👩 Male'), KeyboardButton(text='👩 Female')],
+            [KeyboardButton(text='⚕ Other')],
+        ], resize_keyboard=True, one_time_keyboard=True
+    )
+    await message.answer("⚠️ Please tap a button above.", reply_markup=kb_g)
+
+
+@dp.message(StateFilter(EditProfile.location))
+async def edit_location_h(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    await mark_online(uid)
+
+    if message.location:
+        loc = message.location
+    else:
+        text = (message.text or '').strip()
+        if not text:
+            return
+        lat, lon = await geocode(text)
+        if not lat:
+            await message.answer("📍 Couldn't find that place. Try a city name or use <b>Share My Location</b>.", parse_mode='HTML')
+            return
+        loc = type('L', (), {'latitude': lat, 'longitude': lon})()
+
+    lat, lon = loc.latitude, loc.longitude
+    user_profiles[uid]['lat'] = str(lat)
+    user_profiles[uid]['lon'] = str(lon)
+    user_profiles[uid]['location_name'] = 'GPS' if message.location else text
+    await save_all()
+    await state.clear()
+    await message.answer("✅ Location updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+    ]))
+
+
+@dp.message(StateFilter(EditProfile.photo))
+async def edit_photo_h(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    await mark_online(uid)
+    if not message.photo:
+        await message.answer("📸 Send a photo.")
+        return
+    user_profiles[uid]['photo'] = message.photo[-1].file_id
+    await save_all()
+    await state.clear()
+    await message.answer("✅ Photo updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+    ]))
+
 
 # ─── Background Tasks ────────────────────────────────────────────────────────
 
