@@ -551,12 +551,46 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
 
 # ── Location ──────────────────────────────────────────────────────────────────
 
+import aiohttp
+
+async def geocode_place(place_name: str):
+    """Convert place name to lat/lon using OpenStreetMap Nominatim (free, no API key)."""
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {"q": place_name, "format": "json", "limit": 1}
+    headers = {"User-Agent": "WinklyBot/1.0"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, headers=headers, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data:
+                    return float(data[0]["lat"]), float(data[0]["lon"])
+    return None, None
+
+
 @dp.message(lambda m: not m.location, StateFilter(Setup.location))
 async def handle_location_text(message: types.Message, state: FSMContext):
+    text = message.text.strip()
+    
+    # Try to geocode the place name
+    lat, lon = await geocode_place(text)
+    if lat and lon:
+        await state.update_data(lat=str(lat), lon=str(lon))
+        await message.answer(
+            f"📍 *Location found!*\n_{lat:.5f}, {lon:.5f}_",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown',
+        )
+        await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
+        return
+
+    # If geocoding fails, show options
     await message.answer(
-        "📍 Please use the *Share Location* button below:",
+        "📍 Couldn't find that place. Try again, or use the buttons below:",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text='📍 Share My Location', request_location=True)]],
+            keyboard=[
+                [KeyboardButton(text='📍 Share My Location', request_location=True)],
+                [KeyboardButton(text='⌨️  Enter Place Name')],
+            ],
             resize_keyboard=True, one_time_keyboard=True,
         ),
     )
@@ -571,7 +605,6 @@ async def handle_location_ok(message: types.Message, state: FSMContext):
         reply_markup=ReplyKeyboardRemove(),
         parse_mode='Markdown',
     )
-    # Advance to confirm screen
     await advance_to(state, Setup.confirm, message.chat.id, message.from_user.id)
 
 
@@ -641,10 +674,13 @@ async def advance_to(state: FSMContext, next_state: State, chat_id: int, user_id
         await bot.send_message(
             chat_id,
             f"_{progress_bar(idx)}_  Step {idx + 1} of {TOTAL_STEPS}\n\n"
-            "📍 *Share your location* so we can find matches near you:",
+            "📍 *Share your location* or type a place name (city, area):",
             parse_mode='Markdown',
             reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text='📍 Share My Location', request_location=True)]],
+                keyboard=[
+                    [KeyboardButton(text='📍 Share My Location', request_location=True)],
+                    [KeyboardButton(text='⌨️  Enter Place Name')],
+                ],
                 resize_keyboard=True, one_time_keyboard=True,
             ),
         )
