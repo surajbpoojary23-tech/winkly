@@ -463,20 +463,23 @@ async def h_name(message: types.Message, state: FSMContext):
 async def h_gender_preferred(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
+    raw = message.text.strip()
+    # Strip emoji prefix (handles ZWJ+skin-tone variants Telegram sends)
+    stripped = raw.lower().lstrip('\U0001f468\u200d\U0001f3fb\U0001f469\u200d\U0001f3fb\U0001f3fb\u200d\U0001f466\u200d\U0001f3fb\u200d\U0001f467\u200d\U0001f3fb\U0001f3eb\U0001f465').lower()
+    keyword = stripped.strip()
+
+    # Normalize responses
+    GENDER_KEYWORDS = {'male': 'Male', 'm': 'Male',
+                       'female': 'Female', 'women': 'Female', 'f': 'Women',
+                       'other': 'Other'}
+    PREF_KEYWORDS = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
+
     d = await state.get_data()
-    raw = message.text.strip().lower()
-
-    G_MAP = {'\u1f468\u200d\U0001f3fb male':'Male','\u0001f469\u200d\U0001f3fb female':'Female',
-             '\u2695\ufe0f other':'Other','male':'Male','female':'Female','other':'Other','m':'Male','f':'Women'}
-    P_MAP = {'\U0001f468\u200d\U0001f3eb men':'Men','\U0001f469\u200d\U0001f3fb women':'Women',
-             '\U0001f465 everyone':'Everyone','men':'Men','women':'Women','everyone':'Everyone',
-             '\U0001f468 Men':'Men','\U0001f469 Women':'Women','\U0001f465 Everyone':'Everyone'}
-
     gender = d.get('gender')
     preferred = d.get('preferred')
 
-    if raw in G_MAP and not gender:
-        await state.update_data(gender=G_MAP[raw])
+    if keyword in GENDER_KEYWORDS and not gender:
+        await state.update_data(gender=GENDER_KEYWORDS[keyword])
         kb2 = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text='\U0001f468 Men'), KeyboardButton(text='\U0001f469 Women')],
@@ -487,8 +490,8 @@ async def h_gender_preferred(message: types.Message, state: FSMContext):
         await state.update_data(prev_bot_msg=msg.message_id)
         return
 
-    if raw in P_MAP and not preferred:
-        await state.update_data(preferred=P_MAP[raw])
+    if keyword in PREF_KEYWORDS and not preferred:
+        await state.update_data(preferred=PREF_KEYWORDS[keyword])
         if gender:
             await state.set_state(Signup.location_photo)
             kb3 = ReplyKeyboardMarkup(
@@ -506,14 +509,14 @@ async def h_gender_preferred(message: types.Message, state: FSMContext):
             await state.update_data(prev_bot_msg=msg.message_id)
         else:
             kb_g = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-                    [KeyboardButton(text='\u2695\ufe0f Other')],
-                ], resize_keyboard=True, one_time_keyboard=True
+    keyboard=[
+        [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
+        [KeyboardButton(text='\u2695\ufe0f Other')],
+    ], resize_keyboard=True, one_time_keyboard=True
             )
             msg = await message.answer(
-                "\u2696\ufe0f <b>What's your gender?</b>",
-                parse_mode='HTML', reply_markup=kb_g
+    "\u2696\ufe0f <b>What's your gender?</b>",
+    parse_mode='HTML', reply_markup=kb_g
             )
             await state.update_data(prev_bot_msg=msg.message_id)
         return
