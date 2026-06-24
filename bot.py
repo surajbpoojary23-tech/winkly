@@ -44,12 +44,18 @@ class Setup(StatesGroup):
 user_profiles: dict = {}
 
 # ── Match & Chat stores ─────────────────────────────────────────────────────
-# likes_sent: {liker_id: set(liked_ids)}
+# likes_sent: {liker_id: set(liked_ids)} — legacy, kept for compatibility
 likes_sent: dict[int, set] = {}
 # matches: {user_id: {partner_id: match_data}}
 active_matches: dict[int, dict[int, dict]] = {}
 # current_chat: {user_id: partner_id} — tracks who each user is chatting with
 current_chat: dict[int, int] = {}
+
+# ── Omegle-style waiting queue ───────────────────────────────────────────────
+# users waiting for a match: {user_id: {'added_at': timestamp, 'message_id': int}}
+waiting_queue: dict[int, dict] = {}
+# background task references for waiting users
+waiting_tasks: dict[int, asyncio.Task] = {}
 
 PROGRESS_STEPS = ["name", "age", "gender", "bio", "preferred_gender", "location"]
 TOTAL_STEPS = 6
@@ -135,14 +141,10 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def find_matches(me: dict, all_profiles: dict, radius_km: float = 50) -> list[dict]:
+def find_matches(me: dict, all_profiles: dict) -> list[dict]:
     """
-    Find mutual matches for 'me'.
-    A match = other user B where:
-      - B's gender is in my preferred_gender pool
-      - my gender is in B's preferred_gender pool
-      - distance between us <= radius_km
-    Returns sorted by distance (nearest first).
+    Find ALL mutually compatible profiles for 'me', sorted by distance (nearest first).
+    No radius limit — we want to find anyone compatible worldwide.
     """
     me_lat = float(me['lat'])
     me_lon = float(me['lon'])
@@ -183,13 +185,29 @@ def find_matches(me: dict, all_profiles: dict, radius_km: float = 50) -> list[di
             continue
 
         dist = haversine_km(me_lat, me_lon, float(other['lat']), float(other['lon']))
-        if dist > radius_km:
-            continue
-
         matches.append({**other, 'uid': uid, 'distance_km': round(dist, 1)})
 
     matches.sort(key=lambda m: m['distance_km'])
     return matches
+
+
+def find_best_waiting_match(me: dict) -> dict | None:
+    """
+    Find the best match from users currently waiting in queue.
+    Returns the best compatible waiting user or None.
+    """
+    me_with_uid = {**me, '_uid': me.get('_uid')}
+    for uid, wait_info in waiting_queue.items():
+        if uid not in user_profiles:
+            continue
+        other = user_profiles[uid]
+        # Check mutual compatibility
+        matches = find_matches(me_with_uid, {uid: other})
+        if matches:
+            match = matches[0]
+            match['wait_info'] = wait_info
+            return match
+    return None
 
 
 def profile_kb() -> InlineKeyboardMarkup:
@@ -357,7 +375,7 @@ async def handle_name(message: types.Message, state: FSMContext):
     try:
         name = message.text.strip()
         if len(name) < 2:
-            await message.answer("⚠️ Name must be at least 2 characters. Try again:")
+            await message.answer("⚠️ Name must be at least 2 characters. Please enter a longer name:")
             return
         await state.update_data(name=name)
         await message.answer(f"📛 *{name}* — got it!")
@@ -453,7 +471,7 @@ async def handle_dob(message: types.Message, state: FSMContext):
         return
     age = calc_age(dob)
     if not (18 <= age <= 100):
-        await message.answer("⚠️ You must be at least 18 and no older than 100. Try again:")
+        await message.answer("⚠️ You must be at least 18 and no older than 100. Please enter a valid age:")
         return
     await state.update_data(age=str(age), dob=str(dob))
     await message.answer(f"🎂 *{age}* years old — perfect!")
@@ -482,7 +500,7 @@ async def handle_gender(message: types.Message, state: FSMContext):
         gender = emoji_map.get(raw)
     if not gender:
         await message.answer(
-            "⚠️ Please tap one of the buttons or type: Male / Female / Other",
+            "⚠️ Please tap one of the gender buttons or type: Male / Female / Other",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text='👨 Male'), KeyboardButton(text='👩 Female'), KeyboardButton(text='⚧ Other')]],
                 resize_keyboard=True, one_time_keyboard=True,
@@ -535,7 +553,7 @@ async def handle_bio(message: types.Message, state: FSMContext):
         return
     
     if len(raw) < 10:
-        await message.answer("⚠️ Please write at least a sentence or two (or type /skip):")
+        await message.answer("⚠️ Please write at least a sentence or two about yourself (or type /skip to skip):")
         return
     await state.update_data(bio=raw)
     await message.answer("📝 *Bio saved!*")
@@ -577,7 +595,7 @@ async def handle_preferred_gender(message: types.Message, state: FSMContext):
         pref = emoji_map.get(raw)
     if not pref:
         await message.answer(
-            "⚠️ Please tap one of the buttons: Men / Women / Everyone",
+            "⚠️ Please tap one of the gender preference buttons: Men / Women / Everyone",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text='👨 Men')],
@@ -766,26 +784,182 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_reply_markup(reply_markup=None)
 
     if uid not in user_profiles:
-        await cb.message.answer("⚠️ No profile found. Send /start to set one up.")
+        await cb.message.answer("⚠️ No profile found. Please send /start to set up your profile first.")
         await cb.answer()
         return
 
     me = user_profiles[uid]
-    matches = find_matches({**me, '_uid': uid}, user_profiles)
-
-    if not matches:
-        await cb.message.answer(
-            f"🔎 No matches found near *{me['name']}*.\n"
-            "Try expanding your preferences or waiting for more people nearby.",
+    
+    # First, check if there's someone waiting for us in the queue
+    waiting_match = find_best_waiting_match(me)
+    if waiting_match:
+        partner = waiting_match['uid']
+        partner_name = waiting_match['name']
+        
+        # Create mutual match
+        if uid not in active_matches:
+            active_matches[uid] = {}
+        if partner not in active_matches:
+            active_matches[partner] = {}
+        
+        active_matches[uid][partner] = {'status': 'matched'}
+        active_matches[partner][uid] = {'status': 'matched'}
+        
+        # Remove from waiting queue
+        if uid in waiting_queue:
+            del waiting_queue[uid]
+        if partner in waiting_queue:
+            del waiting_queue[partner]
+        
+        # Notify both users of instant match
+        await bot.send_message(
+            uid,
+            f"🎉 *It's a Match!*\n\n"
+            f"You and *{partner_name}* are compatible!\n\n"
+            f"📛  {partner_name}\n"
+            f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
+            f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
+            "Tap below to start chatting:",
             parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
+            ]),
         )
+        
+        await bot.send_message(
+            partner,
+            f"🎉 *It's a Match!*\n\n"
+            f"You and *{me['name']}* are compatible!\n\n"
+            f"📛  {me['name']}\n"
+            f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
+            f"📝  {me.get('bio', '') or '—'}\n\n"
+            "Tap below to start chatting:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
+            ]),
+        )
+        
         await cb.answer()
         return
-
-    # Cache matches and show first one with Like/Skip
-    _LAST_MATCHES[uid] = matches
-    await _show_next_match(cb.message, uid, 0)
+    
+    # No instant match - add to waiting queue
+    import time
+    waiting_queue[uid] = {
+        'added_at': time.time(),
+        'message_id': cb.message.message_id,
+        'state': state,
+    }
+    
+    # Send "Searching..." message
+    search_msg = await cb.message.answer(
+        f"🔍 *{me['name']}*, searching for someone compatible...\n\n"
+        "Looking for someone who matches your preferences (gender + location).\n"
+        "This usually takes 5-30 seconds. You can tap 'Skip' to cancel.\n\n"
+        "⏳ *Waiting in queue...*",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌  Skip", callback_data='skip_waiting')],
+        ]),
+    )
+    
+    # Update the waiting queue entry with message ID
+    waiting_queue[uid]['message_id'] = search_msg.message_id
+    
+    # Schedule background check for match
+    async def check_for_match():
+        await asyncio.sleep(5)  # Check every 5 seconds
+        if uid not in waiting_queue:
+            return
+        
+        # Try to find a match
+        waiting_match = find_best_waiting_match(me)
+        if waiting_match:
+            partner = waiting_match['uid']
+            partner_name = waiting_match['name']
+            
+            # Create mutual match
+            if uid not in active_matches:
+                active_matches[uid] = {}
+            if partner not in active_matches:
+                active_matches[partner] = {}
+            
+            active_matches[uid][partner] = {'status': 'matched'}
+            active_matches[partner][uid] = {'status': 'matched'}
+            
+            # Remove from waiting queue
+            if uid in waiting_queue:
+                del waiting_queue[uid]
+            if partner in waiting_queue:
+                del waiting_queue[partner]
+            
+            # Update the searching message
+            try:
+                await bot.edit_message_text(
+                    chat_id=cb.message.chat.id,
+                    message_id=search_msg.message_id,
+                    text=f"🎉 *{me['name']}*, you matched with *{partner_name}*!\n\n"
+                         f"📛  {partner_name}\n"
+                         f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
+                         f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
+                         "Tap below to start chatting:",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
+                    ]),
+                )
+            except:
+                pass
+            
+            # Notify the partner as well
+            try:
+                await bot.send_message(
+                    partner,
+                    f"🎉 *It's a Match!*\n\n"
+                    f"You and *{me['name']}* are compatible!\n\n"
+                    f"📛  {me['name']}\n"
+                    f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
+                    f"📝  {me.get('bio', '') or '—'}\n\n"
+                    "Tap below to start chatting:",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
+                    ]),
+                )
+            except:
+                pass
+        else:
+            # Still waiting - schedule another check
+            if uid in waiting_queue:
+                asyncio.create_task(check_for_match())
+    
+    # Start the background check
+    asyncio.create_task(check_for_match())
     await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'skip_waiting')
+async def skip_waiting(cb: types.CallbackQuery):
+    """Skip the waiting queue and return to profile."""
+    uid = cb.from_user.id
+    
+    if uid in waiting_queue:
+        del waiting_queue[uid]
+        if uid in user_profiles:
+            await cb.message.answer(
+                "❌ *Search cancelled.*\n\n"
+                "You can tap 'Find Matches' again to start searching.\n"
+                "Your profile is saved and ready.",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+                    [InlineKeyboardButton(text="👤  View Profile", callback_data='back_to_profile')],
+                ]),
+            )
+        else:
+            await cb.message.answer("❌ Search cancelled.")
+    else:
+        await cb.answer("Not currently waiting.")
 
 
 async def _show_next_match(message, uid: int, idx: int):
@@ -795,6 +969,7 @@ async def _show_next_match(message, uid: int, idx: int):
             "🎉 That's everyone nearby! Check back later.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄  Search Again", callback_data='do_match')],
+                [InlineKeyboardButton(text="👤  Back to Profile", callback_data='back_to_profile')],
             ]),
         )
         return
@@ -918,9 +1093,11 @@ async def start_chat(cb: types.CallbackQuery):
     partner_name = user_profiles[partner]['name']
     await cb.message.edit_text(
         f"💬 *Chat started with {partner_name}*\n\n"
-        "Send your messages below. Tap 'End Chat' to leave.",
+        "Send your messages below. You can tap 'Skip' to end this chat early or 'End Chat' to finish.\n\n"
+        "💡 *Pro tip:* Type 'skip' anytime to find someone new!",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️  Skip", callback_data=f'skip_chat:{partner}')],
             [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{partner}')],
         ]),
     )
@@ -928,12 +1105,96 @@ async def start_chat(cb: types.CallbackQuery):
     # Also tell the partner
     await bot.send_message(
         partner,
-        f"💬 *{user_profiles[uid]['name']}* started chatting!\n",
+        f"💬 *{user_profiles[uid]['name']}* started chatting!\n\n"
+        "You can tap 'Skip' to end this chat early or 'End Chat' to finish.",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️  Skip", callback_data=f'skip_chat:{uid}')],
             [InlineKeyboardButton(text="🔚 End Chat", callback_data=f'end_chat:{uid}')],
         ]),
     )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('skip_chat:'))
+async def skip_chat(cb: types.CallbackQuery):
+    """Skip the current chat and return to profile."""
+    uid = cb.from_user.id
+    partner = int(cb.data.split(':')[1])
+
+    # Remove from active matches
+    if uid in active_matches and partner in active_matches[uid]:
+        del active_matches[uid][partner]
+    if partner in active_matches and uid in active_matches[partner]:
+        del active_matches[partner][uid]
+    
+    # Remove from chat tracking
+    if uid in current_chat:
+        del current_chat[uid]
+    if partner in current_chat:
+        del current_chat[partner]
+    
+    # Notify both users
+    await cb.message.edit_text(
+        "⏭️ *Chat skipped.*\n\n"
+        "You can start searching for someone new.\n\n"
+        "Tap below to find matches:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+            [InlineKeyboardButton(text="👤  View Profile", callback_data='back_to_profile')],
+        ]),
+    )
+    
+    try:
+        await bot.send_message(
+            partner,
+            f"⏭️ *{user_profiles[uid]['name']}* ended the chat early.\n\n"
+            "You can start searching for someone new.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+            ]),
+        )
+    except:
+        pass
+    
+    await cb.answer("Chat skipped")
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('end_chat:'))
+async def end_chat_handler(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    partner = int(cb.data.split(':')[1])
+
+    # Remove from chat tracking
+    if uid in current_chat:
+        del current_chat[uid]
+    if partner in current_chat:
+        del current_chat[partner]
+
+    await cb.message.edit_text("🔚 *Chat ended.*\n\n"
+                               "You can find someone new or view your profile.",
+                               parse_mode='Markdown',
+                               reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                   [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+                                   [InlineKeyboardButton(text="👤  View Profile", callback_data='back_to_profile')],
+                               ]))
+
+    # Also tell the partner
+    try:
+        await bot.send_message(
+            partner,
+            f"🔚 *{user_profiles[uid]['name']}* ended the chat.\n\n"
+            "You can find someone new.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Find Matches", callback_data='do_match')],
+            ]),
+        )
+    except:
+        pass
+    
     await cb.answer()
 
 
@@ -951,11 +1212,18 @@ async def end_chat_handler(cb: types.CallbackQuery):
     await cb.answer()
 
 
-# ── Message relay (the core chat feature) ───────────────────────────────────
+# ── Message relay (the core chat feature) ────────────────────────────────────
+# NOTE: This MUST come after all FSM message handlers (which use StateFilter).
+# Without StateFilter here, it catches all text including profile setup input.
 
 @dp.message()
-async def relay_message(message: types.Message):
+async def relay_message(message: types.Message, state: FSMContext):
     uid = message.from_user.id
+
+    # Ignore if user is in the middle of profile setup (FSM state)
+    current_state = await state.get_state()
+    if current_state is not None:
+        return  # Let the FSM handler deal with it
 
     # Check if this user is in an active chat
     if uid not in current_chat:
@@ -971,7 +1239,7 @@ async def relay_message(message: types.Message):
         # Optional: show delivered checkmark
         # await message.react([types.ReactionTypeEmoji(emoji='✅')])
     except Exception as e:
-        await message.answer(f"⚠️ Couldn't deliver your message. They may have blocked the bot.")
+        await message.answer(f"⚠️ Couldn't deliver your message. They may have blocked the bot or left the chat.")
         print(f"Relay error: {e}")
 
 
@@ -984,7 +1252,7 @@ async def show_more_matches(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     me = user_profiles.get(uid, {})
     if not me:
-        await cb.answer("⚠️ Profile not found.", show_alert=True)
+        await cb.answer("⚠️ Profile not found. Please set up your profile first.", show_alert=True)
         return
 
     all_matches = find_matches({**me, '_uid': uid}, user_profiles)
@@ -994,7 +1262,12 @@ async def show_more_matches(cb: types.CallbackQuery, state: FSMContext):
 
     remaining = len(all_matches) - cached
     if remaining <= 0:
-        await cb.message.answer("🎉 That's everyone nearby! Check back later.")
+        await cb.message.answer(
+            "🎉 That's everyone nearby! Check back later or try expanding your preferences.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄  Search Again", callback_data='do_match')],
+            ]),
+        )
         await cb.answer()
         return
 
@@ -1060,7 +1333,35 @@ async def cmd_chat(message: types.Message):
     )
 
 
-# ── /profile command (show current profile) ────────────────────────────────────
+# ── /stop command (end current chat) ─────────────────────────────────────────
+
+@dp.message(Command('stop'))
+async def cmd_stop(message: types.Message):
+    uid = message.from_user.id
+
+    if uid not in current_chat:
+        await message.answer("🔚 You're not in any chat to stop.")
+        return
+
+    partner = current_chat[uid]
+    partner_name = user_profiles.get(partner, {}).get('name', 'Someone')
+
+    # Clear both sides of the chat
+    current_chat.pop(uid, None)
+    current_chat.pop(partner, None)
+
+    await message.answer("🔚 *Chat ended.*", parse_mode='Markdown')
+
+    # Notify partner (if they still have a profile)
+    if partner in user_profiles:
+        await bot.send_message(
+            partner,
+            f"🔚 *{user_profiles[uid].get('name', 'Someone')} ended the chat.*",
+            parse_mode='Markdown',
+        )
+
+
+# ── /profile command (show current profile) ───────────────────────────────────
 # ── Profile command ──
 @dp.message(Command('profile'))
 async def cmd_profile(message: types.Message):
