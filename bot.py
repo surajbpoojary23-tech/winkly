@@ -909,56 +909,56 @@ async def do_match(cb: types.CallbackQuery, state: FSMContext):
         partner = waiting_match['uid']
         partner_name = waiting_match['name']
         
-    # Create mutual match
-    if uid not in active_matches:
-        active_matches[uid] = {}
-    if partner not in active_matches:
-        active_matches[partner] = {}
-    
-    active_matches[uid][partner] = {'status': 'matched'}
-    active_matches[partner][uid] = {'status': 'matched'}
-    
-    # Increment match count for both users
-    increment_match_count(uid)
-    increment_match_count(partner)
-    
-    # Remove from waiting queue
-    if uid in waiting_queue:
-        del waiting_queue[uid]
-    if partner in waiting_queue:
-        del waiting_queue[partner]
-    
-    # Notify both users of instant match
-    await bot.send_message(
-        uid,
-        f"🎉 *It's a Match!*\n\n"
-        f"You and *{partner_name}* are compatible!\n\n"
-        f"📛  {partner_name}\n"
-        f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
-        f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
-        "Tap below to start chatting:",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
-        ]),
-    )
-    
-    await bot.send_message(
-        partner,
-        f"🎉 *It's a Match!*\n\n"
-        f"You and *{me['name']}* are compatible!\n\n"
-        f"📛  {me['name']}\n"
-        f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
-        f"📝  {me.get('bio', '') or '—'}\n\n"
-        "Tap below to start chatting:",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
-        ]),
-    )
-    
-    await cb.answer()
-    return
+        # Create mutual match
+        if uid not in active_matches:
+            active_matches[uid] = {}
+        if partner not in active_matches:
+            active_matches[partner] = {}
+        
+        active_matches[uid][partner] = {'status': 'matched'}
+        active_matches[partner][uid] = {'status': 'matched'}
+        
+        # Increment match count for both users
+        increment_match_count(uid)
+        increment_match_count(partner)
+        
+        # Remove from waiting queue
+        if uid in waiting_queue:
+            del waiting_queue[uid]
+        if partner in waiting_queue:
+            del waiting_queue[partner]
+        
+        # Notify both users of instant match
+        await bot.send_message(
+            uid,
+            f"🎉 *It's a Match!*\n\n"
+            f"You and *{partner_name}* are compatible!\n\n"
+            f"📛  {partner_name}\n"
+            f"🎂  {waiting_match['age']}  |  ⚧ {waiting_match['gender']}\n"
+            f"📝  {waiting_match.get('bio', '') or '—'}\n\n"
+            "Tap below to start chatting:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{partner}')],
+            ]),
+        )
+        
+        await bot.send_message(
+            partner,
+            f"🎉 *It's a Match!*\n\n"
+            f"You and *{me['name']}* are compatible!\n\n"
+            f"📛  {me['name']}\n"
+            f"🎂  {me['age']}  |  ⚧ {me['gender']}\n"
+            f"📝  {me.get('bio', '') or '—'}\n\n"
+            "Tap below to start chatting:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬  Chat Now", callback_data=f'chat:{uid}')],
+            ]),
+        )
+        
+        await cb.answer()
+        return
     
     # No instant match - add to waiting queue
     import time
