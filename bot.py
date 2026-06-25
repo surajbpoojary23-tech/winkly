@@ -891,11 +891,19 @@ async def cmd_verify(message: types.Message):
         return
     p = user_profiles[uid]
     if p.get('verified'):
-        await message.answer(
-            "\U0001f3c5 <b>Already Verified!</b>\n\n"
-            "\u2705 You have unlimited free access to chat.\n\nGo find your match! \u2764\ufe0f",
-            parse_mode='HTML', reply_markup=main_kb()
-        )
+        if p.get('gender') == 'Female':
+            await message.answer(
+                "\U0001f3c5 <b>Already Verified!</b>\n\n"
+                "\u2705 You have unlimited free access to chat.\n\nGo find your match! \u2764\ufe0f",
+                parse_mode='HTML', reply_markup=main_kb()
+            )
+        else:
+            await message.answer(
+                "\U0001f3c5 <b>Already Verified!</b>\n\n"
+                "\u2705 Your profile has a verified badge \u2714\ufe0f\n\n"
+                "Your match card will show the verified badge.",
+                parse_mode='HTML', reply_markup=main_kb()
+            )
         return
     st = p.get('verification_status', 'none')
     if st == 'pending':
@@ -919,8 +927,9 @@ async def cmd_verify(message: types.Message):
         return
     await message.answer(
         "\U0001f3c5 <b>Get Verified</b>\n\n"
-        "\U0001f4f7 Upload a full-body photo + selfie to verify.\n"
-        "Female users get <b>unlimited free access</b> after verification!",
+        "\U0001f4f7 Send a clear photo with your face visible to get verified.\n\n"
+        "\u2714\ufe0f All genders get a <b>verified badge</b> on their match card.\n"
+        "\U0001f3c6 <b>Female</b> users also get <b>unlimited free access</b> after verification!",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="\U0001f4f7 Start Verification", callback_data='verify_start')],
         ])
@@ -1083,12 +1092,20 @@ async def h_verify_photo(message: types.Message):
     user_profiles[uid]['verification_status'] = 'verified'
     del _verify_pending[uid]
     await save_all()
-    await message.answer(
-        "\u2705 <b>Verified!</b>\n\n"
-        "Your profile photo is set. You now have unlimited free access to chat.\n\n"
-        "Go find your match! \u2764\ufe0f",
-        parse_mode='HTML', reply_markup=main_kb()
-    )
+    gender = user_profiles[uid].get('gender', '')
+    if gender == 'Female':
+        await message.answer(
+            "\u2705 <b>Verified!</b>\n\n"
+            "Your profile photo is set. You now have unlimited free access to chat.\n\n"
+            "Go find your match! \u2764\ufe0f",
+            parse_mode='HTML', reply_markup=main_kb()
+        )
+    else:
+        await message.answer(
+            "\u2705 <b>Verified!</b>\n\n"
+            "Your profile photo is set. Your match card will now show a verified badge \u2714\ufe0f.",
+            parse_mode='HTML', reply_markup=main_kb()
+        )
 
 async def send_verification_to_admin(uid: int):
     if not ADMIN_CHAT_ID:
@@ -1356,14 +1373,24 @@ async def say_hi(cb: types.CallbackQuery):
                 )
             except:
                 pass
-        await cb.message.edit_text(
-            "⚠️ <b>You've used all your free texts.</b>\n\n"
-            "📸 Verify or upgrade for unlimited access.",
-            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
-                [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
-            ])
-        )
+        p = user_profiles.get(uid, {})
+        if p.get('gender') == 'Female' and not p.get('verified'):
+            await cb.message.edit_text(
+                "⚠️ <b>You've used all your free texts.</b>\n\n"
+                "📸 Verify for unlimited access or upgrade to premium.",
+                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
+                    [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
+                ])
+            )
+        else:
+            await cb.message.edit_text(
+                "⚠️ <b>You've used all your free texts.</b>\n\n"
+                "\U0001f3c6 Upgrade to premium for unlimited access.",
+                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
+                ])
+            )
         await cb.answer()
         return
     pname = user_profiles[uid]['name']
@@ -1451,7 +1478,7 @@ async def relay(message: types.Message, state: FSMContext):
             except:
                 pass
         p = user_profiles[uid]
-        if p.get('gender') in ('Male', 'Female', 'Other') and not p.get('verified'):
+        if p.get('gender') == 'Female' and not p.get('verified'):
             await message.answer(
                 "⚠️ <b>You've used all your free texts.</b>\n\n"
                 "📸 Verify your profile for free unlimited access.",
