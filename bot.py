@@ -417,8 +417,7 @@ def edit_profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="EDIT NAME", callback_data='edit_name'),
          InlineKeyboardButton(text="EDIT BIO", callback_data='edit_bio')],
-        [InlineKeyboardButton(text="EDIT DOB", callback_data='edit_dob'),
-         InlineKeyboardButton(text="EDIT GENDER", callback_data='edit_gender_preferred')],
+        [InlineKeyboardButton(text="EDIT PREFERRED", callback_data='edit_preferred')],
         [InlineKeyboardButton(text="EDIT LOCATION", callback_data='edit_location')],
         [InlineKeyboardButton(text="CHANGE PHOTO", callback_data='edit_photo')],
         [InlineKeyboardButton(text="BACK", callback_data='back_to_profile')],
@@ -1616,14 +1615,13 @@ async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
     if await _guard_edit(state):
         await cb.answer("⚠️ Finish signup first!", show_alert=True)
         return
-    await state.set_state(EditProfile.gender)
     await cb.message.edit_text(
-        "\u270f\ufe0f <b>Edit Gender/Interested</b>\n\n"
-        "⚖️ <b>What's your gender?</b>",
+        "\u270f\ufe0f <b>Edit Interested In</b>\n\n"
+        "\U0001f49d <b>Who are you interested in?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Male", callback_data="edit_gender:Male")],
-            [InlineKeyboardButton(text="👩 Female", callback_data="edit_gender:Female")],
-            [InlineKeyboardButton(text="⚕ Other", callback_data="edit_gender:Other")],
+            [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
             [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
         ])
     )
@@ -1650,22 +1648,7 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 @dp.callback_query(lambda cb: cb.data == 'edit_dob')
-async def edit_dob(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    if await _guard_edit(state):
-        await cb.answer("⚠️ Finish signup first!", show_alert=True)
-        return
-    current_dob = user_profiles.get(uid, {}).get('dob', '')
-    await state.set_state(EditProfile.dob)
-    await cb.message.edit_text(
-        f"\u270f\ufe0f <b>Edit Date of Birth</b>\n\nCurrent: {current_dob or 'Not set'}\n\n"
-        "Enter your date of birth in any format (e.g. 15-08-1998):",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
-        ])
-    )
-    await cb.answer()
+# edit_dob removed
 
 @dp.callback_query(lambda cb: cb.data == 'edit_photo')
 async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
@@ -1797,26 +1780,7 @@ async def cb_skip_dob(cb: types.CallbackQuery, state: FSMContext):
 
 # === Edit profile inline button callbacks ===
 
-@dp.callback_query(lambda cb: cb.data.startswith('edit_gender:'))
-async def cb_edit_gender(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    if await _guard_edit(state):
-        await cb.answer("⚠️ Finish signup first!", show_alert=True)
-        return
-    gender = cb.data.split(':', 1)[1]
-    await state.update_data(gender=gender)
-    await state.set_state(EditProfile.preferred)
-    await cb.message.edit_text(
-        "\U0001f49d <b>Who are you interested in?</b>",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
-            [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
-            [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
-            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
-        ])
-    )
-    await cb.answer()
+# cb_edit_gender removed
 
 
 @dp.callback_query(lambda cb: cb.data.startswith('edit_pref:'))
@@ -1827,13 +1791,10 @@ async def cb_edit_pref(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("⚠️ Finish signup first!", show_alert=True)
         return
     preferred = cb.data.split(':', 1)[1]
-    d = await state.get_data()
-    user_profiles[uid]['gender'] = d.get('gender', user_profiles[uid].get('gender'))
     user_profiles[uid]['preferred_gender'] = preferred
     await save_all()
-    await state.clear()
     await cb.message.edit_text(
-        "\u2705 Gender preferences updated!",
+        "\u2705 <b>Interested in updated!</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
         ])
@@ -1906,28 +1867,7 @@ async def edit_bio_h(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
     ]))
 
-@dp.message(StateFilter(EditProfile.gender))
-async def edit_gender_h(message: types.Message, state: FSMContext):
-    uid = message.from_user.id
-    await mark_online(uid)
-    raw = message.text.strip()
-    nfd = unicodedata.normalize('NFD', raw.lower())
-    keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
-    GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Female', 'other': 'Other'}
-    if keyword not in GENDER_KW:
-        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Male", callback_data="edit_gender:Male")],
-            [InlineKeyboardButton(text="👩 Female", callback_data="edit_gender:Female")],
-            [InlineKeyboardButton(text="⚕ Other", callback_data="edit_gender:Other")],
-        ]))
-        return
-    await state.update_data(gender=GENDER_KW[keyword])
-    await state.set_state(EditProfile.preferred)
-    await message.answer("\U0001f49d <b>Who are you interested in?</b>", parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
-        [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
-        [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
-    ]))
+# edit_gender_h removed
 
 
 @dp.message(StateFilter(EditProfile.preferred))
@@ -1946,12 +1886,10 @@ async def edit_preferred_h(message: types.Message, state: FSMContext):
             [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
         ]))
         return
-    d = await state.get_data()
-    user_profiles[uid]['gender'] = d.get('gender', user_profiles[uid].get('gender'))
     user_profiles[uid]['preferred_gender'] = PREF_KW[keyword]
     await save_all()
     await state.clear()
-    await message.answer("\u2705 Gender preferences updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await message.answer("\u2705 Interested in updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
     ]))
 
@@ -2003,37 +1941,7 @@ async def edit_photo_h(message: types.Message, state: FSMContext):
     ]))
 
 
-@dp.message(StateFilter(EditProfile.dob))
-async def h_edit_dob(message: types.Message, state: FSMContext):
-    uid = message.from_user.id
-    await mark_online(uid)
-    raw = (message.text or '').strip()
-    if not raw:
-        await state.clear()
-        await message.answer("\u2705 DOB cleared.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
-        ]))
-        return
-    dob = parse_dob(raw)
-    if dob is None:
-        await message.answer(
-            "\u26a0\ufe0f <b>Couldn't understand that date.</b>\n\nTry: 15-08-1998  |  1998/08/15  |  August 15 1998",
-            parse_mode='HTML'
-        )
-        return
-    age = calc_age(dob)
-    if age < 18:
-        await message.answer("\u26d4\ufe0f <b>You must be 18+ to use this bot.</b>", parse_mode='HTML')
-        return
-    if age > 100:
-        await message.answer("\u26a0\ufe0f <b>Please enter a valid birth year.</b>", parse_mode='HTML')
-        return
-    user_profiles[uid]['dob'] = raw
-    await save_all()
-    await state.clear()
-    await message.answer(f"✅ DOB updated! Age: {age}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
-    ]))
+# h_edit_dob removed
 
 
 # ─── Background Tasks ────────────────────────────────────────────────────────
