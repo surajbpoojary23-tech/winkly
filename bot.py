@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 def _faces_found(image_path: str) -> bool:
     """Return True if at least one face is detected in the image using OpenCV."""
     try:
-        import cv2
         img = cv2.imread(image_path)
         if img is None:
             return True  # fail-open: accept on read error
@@ -862,6 +861,8 @@ async def h_profile_photo(message: types.Message, state: FSMContext):
     if uid in _verify_pending:
         await h_verify_photo(message)
         return
+    if uid in current_chat:
+        return  # Let relay() forward the photo to the chat partner
     user_profiles[uid]['photo'] = message.photo[-1].file_id
     await save_all()
     await message.answer("\u2705 Profile photo updated!", reply_markup=main_kb())
@@ -1734,9 +1735,6 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
         ])
     )
     await cb.answer()
-
-@dp.callback_query(lambda cb: cb.data == 'edit_dob')
-# edit_dob removed
 
 @dp.callback_query(lambda cb: cb.data == 'edit_photo')
 async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
