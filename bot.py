@@ -193,9 +193,11 @@ class Signup(StatesGroup):
     gender = State()
     preferred = State()
     location = State()
-    photo = State()
     bio = State()
     dob = State()
+
+class Verify(StatesGroup):
+    photo = State()
 
 class EditProfile(StatesGroup):
     name = State()
@@ -1044,7 +1046,7 @@ async def share_bot(cb: types.CallbackQuery, state: FSMContext):
 # ─── Verification callbacks ────────────────────────────────────────────────────
 
 @dp.callback_query(lambda cb: cb.data == 'verify_start')
-async def verify_start(cb: types.CallbackQuery):
+async def verify_start(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     if uid not in user_profiles:
@@ -1055,79 +1057,92 @@ async def verify_start(cb: types.CallbackQuery):
         await cb.message.edit_text("\u2705 You're already verified!")
         await cb.answer()
         return
-    _verify_pending[uid] = 'awaiting_photo'
+    await state.set_state(Verify.photo)
     await cb.message.edit_text(
-        "\U0001f4f7 <b>Verification</b>\n\n"
-        "Send a <b>clear photo</b> of yourself.\n\n"
-        "Any clear photo with a visible face will be accepted as your profile picture.",
-        parse_mode='HTML'
+        "\U0001f4f7 <b>Selfie Verification</b>\n\n"
+        "Take a <b>clear selfie photo</b> now.\n\n"
+        "Your device camera will open automatically.",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
+            one_time_keyboard=True
+        )
     )
     await cb.answer()
 
 
 @dp.callback_query(lambda cb: cb.data == 'reverify')
-async def reverify(cb: types.CallbackQuery):
+async def reverify(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     if uid not in user_profiles:
         await cb.message.edit_text("📝 Please set up your profile first with /start.")
         await cb.answer()
         return
-    # Reset pending verification
     p = user_profiles[uid]
     p['verification_status'] = 'none'
     p.pop('selfie', None)
-    _verify_pending.pop(uid, None)
     await save_all()
-    # Start fresh verification
-    _verify_pending[uid] = 'awaiting_photo'
+    await state.set_state(Verify.photo)
     await cb.message.edit_text(
-        "\U0001f4f7 <b>Verification</b>\n\n"
-        "Send a <b>clear photo</b> of yourself.\n\n"
-        "Any clear photo with a visible face will be accepted as your profile picture.",
-        parse_mode='HTML'
+        "\U0001f4f7 <b>Selfie Verification</b>\n\n"
+        "Take a <b>clear selfie photo</b> now.\n\n"
+        "Your device camera will open automatically.",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
+            one_time_keyboard=True
+        )
     )
     await cb.answer()
 
 
-async def h_verify_photo(message: types.Message):
+@dp.message(StateFilter(Verify.photo))
+async def h_verify_photo(message: types.Message, state: FSMContext):
     uid = message.from_user.id
-    step = _verify_pending.get(uid)
-    if not step or step != 'awaiting_photo':
-        return
     if not message.photo:
         await message.answer(
-            "\u26a0\ufe0f <b>Please send a photo.</b>\n\n"
-            "Any clear photo with a visible face will be accepted.",
-            parse_mode='HTML'
+            "\u26a0\ufe0f <b>Send a photo, not text.</b>\n\n"
+            "Tap the button below to take a selfie.",
+            parse_mode='HTML',
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
+                one_time_keyboard=True
+            )
         )
         return
     fid = message.photo[-1].file_id
     if not await _verify_face(uid, fid):
         await message.answer(
             "\U0001f914 <b>No face detected.</b>\n\n"
-            "Please send a <b>clear photo of yourself</b> with your face clearly visible.",
-            parse_mode='HTML'
+            "Please take a <b>clear selfie</b> with your face clearly visible.",
+            parse_mode='HTML',
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="📸 Try Again", request_photo=True)]],
+                one_time_keyboard=True
+            )
         )
         return
     user_profiles[uid]['photo'] = fid
     user_profiles[uid]['verified'] = True
     user_profiles[uid]['verification_status'] = 'verified'
-    del _verify_pending[uid]
     await save_all()
+    await state.clear()
     gender = user_profiles[uid].get('gender', '')
     if gender == 'Female':
         await message.answer(
             "\u2705 <b>Verified!</b>\n\n"
             "Your profile photo is set. You now have unlimited free access to chat.\n\n"
             "Go find your match! \u2764\ufe0f",
-            parse_mode='HTML', reply_markup=main_kb(uid)
+            parse_mode='HTML',
+            reply_markup=main_kb(uid)
         )
     else:
         await message.answer(
             "\u2705 <b>Verified!</b>\n\n"
             "Your profile photo is set. Your match card will now show a verified badge \u2714\ufe0f.",
-            parse_mode='HTML', reply_markup=main_kb(uid)
+            parse_mode='HTML',
+            reply_markup=main_kb(uid)
         )
 
 async def send_verification_to_admin(uid: int):
