@@ -621,7 +621,7 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
         user_profiles[uid] = prof
         await save_all()
         await state.clear()
-        await message.answer("✅ Location updated!")
+        await message.answer("✅ Location updated!", reply_markup=ReplyKeyboardRemove())
         return
 
     await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
@@ -634,6 +634,7 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
+
 
 
 @dp.message(StateFilter(Signup.location))
