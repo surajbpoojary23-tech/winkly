@@ -692,44 +692,6 @@ async def h_loc_text(message: types.Message, state: FSMContext):
 
 
 
-@dp.message(StateFilter(Signup.photo))
-async def h_photo(message: types.Message, state: FSMContext):
-    uid = message.from_user.id
-    await mark_online(uid)
-    d = await state.get_data()
-    if d.get('prev_bot_msg'):
-        await safe_delete(message.chat.id, d['prev_bot_msg'])
-
-    if message.text and 'skip' in message.text.lower():
-        await state.set_state(Signup.bio)
-        msg = await message.answer(
-            "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
-            ])
-        )
-        await state.update_data(prev_bot_msg=msg.message_id)
-        return
-
-    if not message.photo:
-        await message.answer("📸 Send a photo or tap Skip.")
-        return
-
-    fid = message.photo[-1].file_id
-    await state.update_data(photo=fid)
-
-    await state.set_state(Signup.bio)
-    msg = await message.answer(
-        "📸 Photo saved.\n\n"
-        "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
-        parse_mode='HTML',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
-        ])
-    )
-    await state.update_data(prev_bot_msg=msg.message_id)
-
 
 
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
@@ -1795,7 +1757,7 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(preferred=preferred)
     await state.set_state(Signup.location)
     await cb.message.edit_text(
-        "<b>Step 4 of 7</b>\n\n"
+        "<b>Step 5 of 6</b>\n\n"
         "\U0001f4cd <b>Share your location</b> or type a place name:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
@@ -1838,20 +1800,6 @@ async def cb_loc_enter_text(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@dp.callback_query(lambda cb: cb.data == 'signup_skip_photo')
-async def cb_skip_photo(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    await state.set_state(Signup.bio)
-    await cb.message.edit_text(
-        "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_bio")],
-        ])
-    )
-    await cb.answer()
-
-
 @dp.callback_query(lambda cb: cb.data == 'signup_skip_bio')
 async def cb_skip_bio(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
@@ -1860,24 +1808,6 @@ async def cb_skip_bio(cb: types.CallbackQuery, state: FSMContext):
     if d.get('prev_bot_msg'):
         await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
     await state.update_data(bio='')
-    await state.set_state(Signup.dob)
-    await cb.message.edit_text(
-        "\U0001f4cc <b>When were you born?</b> (optional)\n\nEnter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
-        ])
-    )
-    await cb.answer()
-
-
-@dp.callback_query(lambda cb: cb.data == 'signup_skip_dob')
-async def cb_skip_dob(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    d = await state.get_data()
-    if d.get('prev_bot_msg'):
-        await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
-    await state.update_data(dob='')
     await finish_signup(state, cb.message.chat.id, uid)
     await cb.answer()
 
