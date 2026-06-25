@@ -522,7 +522,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "\u1f44b Hey! I'm <b>Winkly</b>. I'll help you find people nearby.\n\n"
         "Let's set up your profile — it only takes ~30 seconds.\n\n"
-        "<b>Step 1 of 7</b>\n\n"
+        "<b>Step 1 of 6</b>\n\n"
         "\U0001f464 <b>What's your name?</b>",
         parse_mode='HTML'
     )
@@ -540,15 +540,12 @@ async def h_name(message: types.Message, state: FSMContext):
         await message.answer("\u26a0\ufe0f Name must be at least 2 characters.")
         return
     await state.update_data(name=name, username=message.from_user.username or '')
-    await state.set_state(Signup.gender)
+    await state.set_state(Signup.dob)
     msg = await message.answer(
-        "<b>Step 2 of 7</b>\n\n"
-        "\u2696\ufe0f <b>What's your gender?</b>",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
-            [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
-            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
-        ])
+        "<b>Step 2 of 6</b>\n\n"
+        "\U0001f4c5 <b>What's your date of birth?</b>\n\n"
+        "Enter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
+        parse_mode='HTML'
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -571,7 +568,7 @@ async def h_gender(message: types.Message, state: FSMContext):
     await state.update_data(gender=GENDER_KW[keyword])
     await state.set_state(Signup.preferred)
     msg = await message.answer(
-        "<b>Step 3 of 7</b>\n\n"
+        "<b>Step 4 of 6</b>\n\n"
         "\U0001f49d <b>Who are you interested in?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
@@ -604,7 +601,7 @@ async def h_preferred(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
     await state.set_state(Signup.location)
     msg = await message.answer(
-        "<b>Step 4 of 7</b>\n\n"
+        "<b>Step 5 of 6</b>\n\n"
         "\U0001f4cd <b>Share your location</b> or type a place name:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
@@ -638,6 +635,7 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
     await state.set_state(Signup.bio)
     msg = await message.answer(
+        "<b>Step 6 of 6</b>\n\n"
         "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -678,12 +676,13 @@ async def h_loc_text(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(lat=str(lat), lon=str(lon), location_name=text)
-    await state.set_state(Signup.photo)
+    await state.set_state(Signup.bio)
     msg = await message.answer(
-        "📸 <b>Add a photo</b> (optional) — send one now or tap Skip:",
+        "<b>Step 6 of 6</b>\n\n"
+        "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_photo")],
+            [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
@@ -742,15 +741,8 @@ async def h_bio(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
 
     if message.text and 'skip' in message.text.lower():
-        await state.set_state(Signup.dob)
-        msg = await message.answer(
-            "\U0001f4cc <b>When were you born?</b> (optional)\n\nEnter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
-            ])
-        )
-        await state.update_data(prev_bot_msg=msg.message_id)
+        await state.update_data(bio='')
+        await finish_signup(state, message.chat.id, uid)
         return
 
     bio = (message.text or '').strip()
@@ -758,15 +750,7 @@ async def h_bio(message: types.Message, state: FSMContext):
         if len(bio) > 300:
             bio = bio[:300]
         await state.update_data(bio=bio)
-    await state.set_state(Signup.dob)
-    msg = await message.answer(
-        "\U0001f4cc <b>When were you born?</b> (optional)\n\nEnter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
-        parse_mode='HTML',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
-        ])
-    )
-    await state.update_data(prev_bot_msg=msg.message_id)
+    await finish_signup(state, message.chat.id, uid)
 
 
 @dp.message(StateFilter(Signup.dob))
@@ -778,8 +762,12 @@ async def h_dob(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
 
     raw = (message.text or '').strip()
-    if not raw or 'skip' in raw.lower():
-        await finish_signup(state, message.chat.id, uid)
+    if not raw:
+        await message.answer(
+            "\u26a0\ufe0f <b>Please enter your date of birth.</b>\n\n"
+            "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
+            parse_mode='HTML'
+        )
         return
 
     dob = parse_dob(raw)
@@ -787,10 +775,7 @@ async def h_dob(message: types.Message, state: FSMContext):
         await message.answer(
             "\u26a0\ufe0f <b>Couldn't understand that date.</b>\n\n"
             "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
-            ])
+            parse_mode='HTML'
         )
         return
 
@@ -804,15 +789,22 @@ async def h_dob(message: types.Message, state: FSMContext):
     if age > 100:
         await message.answer(
             "\u26a0\ufe0f <b>Please enter a valid birth year.</b>",
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
-            ])
+            parse_mode='HTML'
         )
         return
 
     await state.update_data(dob=raw)
-    await finish_signup(state, message.chat.id, uid)
+    await state.set_state(Signup.gender)
+    msg = await message.answer(
+        "<b>Step 3 of 6</b>\n\n"
+        "\u2696\ufe0f <b>What's your gender?</b>",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
+            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+        ])
+    )
+    await state.update_data(prev_bot_msg=msg.message_id)
 
 
 @dp.message(lambda m: m.photo and m.from_user.id in user_profiles, StateFilter(None))
@@ -1371,10 +1363,9 @@ async def say_hi(cb: types.CallbackQuery):
         if p.get('gender') == 'Female' and not p.get('verified'):
             await cb.message.edit_text(
                 "⚠️ <b>You've used all your free texts.</b>\n\n"
-                "📸 Verify for unlimited access or upgrade to premium.",
+                "📸 Verify your profile for unlimited access.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
-                    [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
                 ])
             )
         else:
@@ -1738,7 +1729,7 @@ async def cb_signup_gender(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(gender=gender)
     await state.set_state(Signup.preferred)
     await cb.message.edit_text(
-        "<b>Step 3 of 7</b>\n\n"
+        "<b>Step 4 of 6</b>\n\n"
         "\U0001f49d <b>Who are you interested in?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
