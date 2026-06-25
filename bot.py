@@ -101,6 +101,14 @@ async def init_storage():
                 dest.update(val)
             except Exception as e:
                 logger.error(f"Failed to load {key}: {e}")
+    # Migrate: ensure new fields exist for existing profiles loaded from Redis
+    for prof in user_profiles.values():
+        if 'free_texts' not in prof:
+            prof['free_texts'] = FREE_TEXTS_JOINING
+        if 'rejected' not in prof:
+            prof['rejected'] = []
+    # Persist migrated fields back to Redis immediately
+    await save_all()
     raw_likes = await r.get('winkly:likes')
     if raw_likes:
         for uid, lst in json.loads(raw_likes).items():
@@ -280,6 +288,10 @@ def consume_text(uid: int):
     if is_premium(uid) or is_verified_female(uid):
         return
     p['free_texts'] = max(0, p.get('free_texts', 0) - 1)
+
+def consume_match(uid: int):
+    """No-op: match limits are removed, unlimited matching allowed."""
+    pass
 
 def quota_summary(uid: int) -> str:
     if is_premium(uid):
@@ -668,13 +680,10 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         parse_mode='HTML', reply_markup=main_kb()
     )
 
-@dp.message(lambda m: m.photo and m.from_user.id in user_profiles)
+@dp.message(lambda m: m.photo and m.from_user.id in user_profiles, StateFilter(None))
 async def h_profile_photo(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
-    st = await state.get_state()
-    if st and (st.startswith('Signup:') or st.startswith('EditProfile:')):
-        return
     if uid in _verify_pending:
         await h_verify_photo(message)
         return
