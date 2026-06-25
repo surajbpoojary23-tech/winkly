@@ -22,7 +22,7 @@ import redis.asyncio as redis
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault
 from aiogram.filters.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -2158,7 +2158,6 @@ async def auto_setup_webhook():
 async def on_startup(dispatcher: Dispatcher):
     logger.info("Starting Winkly Bot v2...")
     # Menu button (left of emoji bar) showing bot commands
-    from aiogram.types import BotCommand
     commands = [
         BotCommand(command="start", description="Start or restart the bot"),
         BotCommand(command="profile", description="View your profile"),
@@ -2169,10 +2168,10 @@ async def on_startup(dispatcher: Dispatcher):
         BotCommand(command="refer", description="Refer friends for free premium"),
     ]
     try:
-        await bot.set_my_commands(commands)
+        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
         logger.info("Menu button added")
     except Exception as e:
-        logger.warning(f"Failed to set commands: {e}")
+        logger.error(f"Failed to set commands: {e}")
 
     await init_storage()
     logger.info(f"Loaded {len(user_profiles)} profiles, {len(active_matches)} matches")
