@@ -593,6 +593,9 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     d = await state.get_data()
     if d.get('prev_bot_msg'):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
+    gps_msg_id = d.get('gps_msg_id')
+    if gps_msg_id:
+        await safe_delete(message.chat.id, gps_msg_id)
     loc = message.location
 
     if d.get('is_editing'):
@@ -1779,12 +1782,16 @@ async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     await state.set_state(Signup.location)
-    await cb.message.edit_text(
-        "\U0001f4cd <b>Share your location</b> - tap the paper clip icon -> Location button:",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⌨️  Enter Place Name Instead", callback_data="loc_enter_text")],
-        ])
+    await cb.message.delete()
+    sent = await cb.message.answer(
+        "\U0001f4cd Tap the <b>Send Location</b> button below:",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
     )
+    await state.update_data(gps_msg_id=sent.message_id)
     await cb.answer()
 
 
@@ -1875,16 +1882,20 @@ async def cb_loc_share_gps_edit(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     if await _guard_edit(state):
-        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        await cb.answer("\u26a0\ufe0f Finish signup first!", show_alert=True)
         return
     await state.set_state(EditProfile.location)
-    await cb.message.edit_text(
-        "\U0001f4cd <b>Share your location</b> - tap the paper clip icon -> Location button:",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⌨️  Enter Place Name Instead", callback_data="loc_enter_text_edit")],
-            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
-        ])
+    await state.update_data(is_editing=True)
+    await cb.message.delete()
+    sent = await cb.message.answer(
+        "\U0001f4cd Tap the <b>Send Location</b> button below:",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
     )
+    await state.update_data(gps_msg_id=sent.message_id)
     await cb.answer()
 
 
