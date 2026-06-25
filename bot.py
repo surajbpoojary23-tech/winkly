@@ -696,8 +696,7 @@ async def h_loc_text(message: types.Message, state: FSMContext):
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     data = await state.get_data()
     try:
-        r = await bot.send_message(chat_id, ".", reply_markup=ReplyKeyboardRemove())
-        await safe_delete(chat_id, r.message_id)
+        await bot.send_message(chat_id, ".", reply_markup=ReplyKeyboardRemove())
     except:
         pass
     prof = {
@@ -752,8 +751,6 @@ async def h_bio(message: types.Message, state: FSMContext):
         await state.update_data(bio=bio)
     await finish_signup(state, message.chat.id, uid)
 
-
-@dp.message(StateFilter(Signup.dob))
 
 def dob_picker_kb(page: int = 0) -> InlineKeyboardMarkup:
     """Year picker: page 0 = recent years (2006-1987), page 1 = older (1986-1967), page 2 = oldest (1966-1950)"""
@@ -834,9 +831,6 @@ async def h_dob(message: types.Message, state: FSMContext):
 async def h_profile_photo(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
-    if uid in _verify_pending:
-        await h_verify_photo(message)
-        return
     if uid in current_chat:
         return  # Let relay() forward the photo to the chat partner
     user_profiles[uid]['photo'] = message.photo[-1].file_id
@@ -1461,9 +1455,6 @@ async def relay(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     if uid not in user_profiles:
-        return
-    if uid in _verify_pending:
-        await h_verify_photo(message)
         return
     if uid not in current_chat:
         return
