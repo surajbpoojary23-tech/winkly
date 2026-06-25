@@ -24,10 +24,22 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault
 from aiogram.filters.state import State, StatesGroup
+import face_recognition
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def _faces_found(image_path: str) -> bool:
+    """Return True if at least one face is detected in the image."""
+    try:
+        img = face_recognition.load_image_file(image_path)
+        encodings = face_recognition.face_encodings(img, model='cnn')
+        return len(encodings) >= 1
+    except Exception as e:
+        logger.warning(f"Face detection error: {e}")
+        return True  # fail-open: accept on error
+
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -1042,6 +1054,30 @@ async def h_verify_photo(message: types.Message):
         )
         return
     fid = message.photo[-1].file_id
+    # Download photo for face detection
+    tmp_path = f"/tmp/verify_{uid}.jpg"
+    try:
+        await bot.download(fid, destination=tmp_path)
+    except Exception as e:
+        logger.warning(f"Failed to download photo for verification: {e}")
+    else:
+        if not _faces_found(tmp_path):
+            import os
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
+            await message.answer(
+                "\U0001f914 <b>No face detected.</b>\n\n"
+                "Please send a <b>clear photo of yourself</b> with your face clearly visible.",
+                parse_mode='HTML'
+            )
+            return
+        import os
+        try:
+            os.remove(tmp_path)
+        except:
+            pass
     user_profiles[uid]['photo'] = fid
     user_profiles[uid]['verified'] = True
     user_profiles[uid]['verification_status'] = 'verified'
