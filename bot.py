@@ -1256,6 +1256,9 @@ async def start_chat(cb: types.CallbackQuery):
     if uid not in active_matches or pid not in active_matches.get(uid, {}):
         await cb.answer("⚠️ You are not matched with this user.", show_alert=True)
         return
+    if not check_text_quota(uid):
+        await cb.answer("⚠️ No free texts remaining. Upgrade to continue.", show_alert=True)
+        return
     current_chat[uid] = pid
     current_chat[pid] = uid
     await save_all()
@@ -1293,9 +1296,35 @@ async def say_hi(cb: types.CallbackQuery):
     if current_chat.get(uid) != pid:
         await cb.answer("⚠️ Not in an active chat.", show_alert=True)
         return
+    if not check_text_quota(uid):
+        # End the chat — no quota
+        partner = current_chat.pop(uid, None)
+        if partner:
+            current_chat.pop(partner, None)
+            await save_all()
+            try:
+                await bot.send_message(
+                    partner,
+                    f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} has used all their free texts.",
+                    parse_mode='HTML'
+                )
+            except:
+                pass
+        await cb.message.edit_text(
+            "⚠️ <b>You've used all your free texts.</b>\n\n"
+            "📸 Verify or upgrade for unlimited access.",
+            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
+                [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
+            ])
+        )
+        await cb.answer()
+        return
     pname = user_profiles[uid]['name']
     try:
         await bot.send_message(pid, f"\U0001f44b <b>{pname}</b> said: Hi!", parse_mode='HTML')
+        consume_text(uid)
+        await save_all()
     except:
         pass
     try:
@@ -1359,6 +1388,22 @@ async def relay(message: types.Message, state: FSMContext):
         return
     pid = current_chat[uid]
     if not check_text_quota(uid):
+        # End the active chat — user can no longer send OR receive
+        partner = current_chat.pop(uid, None)
+        if partner:
+            current_chat.pop(partner, None)
+            await save_all()
+            try:
+                await bot.send_message(
+                    partner,
+                    f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} has used all their free texts. "
+                    "The chat has ended.\n\nFind a new match or upgrade for unlimited texts!",
+                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\U0001f4ac Find New Match", callback_data='do_match')],
+                    ])
+                )
+            except:
+                pass
         p = user_profiles[uid]
         if p.get('gender') in ('Male', 'Female', 'Other') and not p.get('verified'):
             await message.answer(
