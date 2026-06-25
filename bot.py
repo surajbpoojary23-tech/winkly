@@ -751,7 +751,7 @@ async def cmd_profile(message: types.Message):
         await message.answer("📝 You haven't set up a profile yet.\nSend /start to begin!")
         return
     await message.answer(
-        profile_text(user_profiles[uid]) + f"\n\n{quota_summary(uid)}",
+        profile_text(user_profiles[uid]),
         parse_mode='HTML', reply_markup=main_kb()
     )
 
@@ -1405,7 +1405,7 @@ async def btp(cb: types.CallbackQuery):
         await cb.answer()
         return
     await cb.message.edit_text(
-        profile_text(user_profiles[uid]) + f"\n\n{quota_summary(uid)}",
+        profile_text(user_profiles[uid]),
         parse_mode='HTML', reply_markup=main_kb()
     )
     await cb.answer()
