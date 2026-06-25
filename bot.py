@@ -1159,7 +1159,10 @@ async def skip_match(cb: types.CallbackQuery):
     # Remove from active_matches if present
     active_matches.get(uid, {}).pop(pid, None)
     active_matches.get(pid, {}).pop(uid, None)
-    await cb.message.edit_text(
+    # Delete old match card (may be a photo — edit_text fails on media messages)
+    await safe_delete(uid, cb.message.message_id)
+    await bot.send_message(
+        uid,
         "\u274c <b>Skipped.</b> You won't be matched with this person again.\n\n"
         "What would you like to do next?",
         parse_mode='HTML', reply_markup=reengage_kb()
@@ -1183,7 +1186,11 @@ async def start_chat(cb: types.CallbackQuery):
     except:
         pass
     pname = user_profiles.get(pid, {}).get('name', 'Someone')
-    await cb.message.edit_text(
+    # Delete old match card (may be a photo — edit_text fails on media messages)
+    await safe_delete(uid, cb.message.message_id)
+    # Send chat interface as a fresh message
+    await bot.send_message(
+        uid,
         f"\U0001f4ac <b>Chat with {pname}</b>\n\n"
         "Send your messages below. Tap <b>Say Hi</b> to introduce yourself!\n\n"
         "Use /stop to end the chat.",
