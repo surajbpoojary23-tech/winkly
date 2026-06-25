@@ -58,25 +58,33 @@ except Exception as e:
     razorpay_client = None
 
 _redis = None
+_redis_failed_time = 0.0
 
 async def get_redis():
-    global _redis
-    if _redis is None:
-        if REDIS_URL:
-            try:
-                _redis = redis.from_url(REDIS_URL, decode_responses=True)
-                # Test connection
-                await _redis.ping()
-            except Exception as e:
-                logger.warning(f"Redis unavailable: {e}. Running in-memory only.")
-                _redis = None
-        else:
-            try:
-                _redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
-                await _redis.ping()
-            except Exception:
-                logger.warning("Local Redis not available. Running in-memory only.")
-                _redis = None
+    global _redis, _redis_failed_time
+    if _redis is not None:
+        return _redis
+    # Don't retry more than once per 60 seconds
+    if time.time() - _redis_failed_time < 60:
+        return None
+    if REDIS_URL:
+        try:
+            _redis = redis.from_url(REDIS_URL, decode_responses=True)
+            await _redis.ping()
+            _redis_failed_time = 0.0
+        except Exception as e:
+            logger.warning(f"Redis unavailable: {e}. Running in-memory only.")
+            _redis = None
+            _redis_failed_time = time.time()
+    else:
+        try:
+            _redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
+            await _redis.ping()
+            _redis_failed_time = 0.0
+        except Exception:
+            logger.warning("Local Redis not available. Running in-memory only.")
+            _redis = None
+            _redis_failed_time = time.time()
     return _redis
 
 async def init_storage():
@@ -107,6 +115,8 @@ async def init_storage():
             prof['free_texts'] = FREE_TEXTS_JOINING
         if 'rejected' not in prof:
             prof['rejected'] = []
+        if 'dob' not in prof:
+            prof['dob'] = ''
     # Persist migrated fields back to Redis immediately
     await save_all()
     raw_likes = await r.get('winkly:likes')
@@ -150,6 +160,7 @@ class Signup(StatesGroup):
     location = State()
     photo = State()
     bio = State()
+    dob = State()
 
 class EditProfile(StatesGroup):
     name = State()
@@ -158,6 +169,7 @@ class EditProfile(StatesGroup):
     preferred = State()
     location = State()
     photo = State()
+    dob = State()
 
 GENDER_NORM = {'male':'Male','female':'Female','other':'Other','men':'Male','women':'Female','m':'Male','f':'Female',
                 '\U0001f468\u200d\U0001f3fb':'Male','\U0001f469\u200d\U0001f3fb':'Female','\u2695\ufe0f':'Other',
@@ -254,10 +266,6 @@ async def get_online_count() -> int:
 
 FREE_TEXTS_JOINING = 30  # One-time free texts for new users
 
-def _reset_daily(uid: int):
-    """No-op kept for backward compat if called elsewhere."""
-    pass
-
 def is_premium(uid: int) -> bool:
     if uid not in premium_subscriptions: return False
     exp_str = premium_subscriptions[uid].get('expiry_date', '')
@@ -289,10 +297,6 @@ def consume_text(uid: int):
     if is_premium(uid) or is_verified_female(uid):
         return
     p['free_texts'] = max(0, p.get('free_texts', 0) - 1)
-
-def consume_match(uid: int):
-    """No-op: match limits are removed, unlimited matching allowed."""
-    pass
 
 def quota_summary(uid: int) -> str:
     if is_premium(uid):
@@ -339,7 +343,8 @@ async def credit_referrer(ref_code: str, new_uid: int):
             cnt = await referral_count(uid)
             logger.info(f"Referrer {uid} has {cnt} referrals")
             if cnt >= 3: await award_free_premium(uid)
-            return
+            return True
+    return False
 
 def find_compat(me: dict, all_profiles: Dict[int, dict]):
     my_lat, my_lon = me.get('lat'), me.get('lon')
@@ -412,7 +417,8 @@ def edit_profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="EDIT NAME", callback_data='edit_name'),
          InlineKeyboardButton(text="EDIT BIO", callback_data='edit_bio')],
-        [InlineKeyboardButton(text="EDIT GENDER", callback_data='edit_gender_preferred')],
+        [InlineKeyboardButton(text="EDIT DOB", callback_data='edit_dob'),
+         InlineKeyboardButton(text="EDIT GENDER", callback_data='edit_gender_preferred')],
         [InlineKeyboardButton(text="EDIT LOCATION", callback_data='edit_location')],
         [InlineKeyboardButton(text="CHANGE PHOTO", callback_data='edit_photo')],
         [InlineKeyboardButton(text="BACK", callback_data='back_to_profile')],
@@ -434,7 +440,13 @@ def profile_text(p: dict) -> str:
     else:
         loc = 'NO LOCATION'
     bio = p.get('bio') or 'NONE'
-    return (f"YOUR PROFILE:\nName: {p.get('name','?')}\nGender: {p.get('gender','?')} | Interested: {p.get('preferred_gender','?')}"
+    age_str = ""
+    dob_raw = p.get('dob')
+    if dob_raw:
+        dob = parse_dob(dob_raw)
+        if dob:
+            age_str = f" | Age: {calc_age(dob)}"
+    return (f"YOUR PROFILE:\nName: {p.get('name','?')}\nGender: {p.get('gender','?')} | Interested: {p.get('preferred_gender','?')}{age_str}"
             f"\nBio: {bio}\nLocation: {loc}\n{ph}{vb}")
 
 
@@ -466,7 +478,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "\u1f44b Hey! I'm <b>Winkly</b>. I'll help you find people nearby.\n\n"
         "Let's set up your profile — it only takes ~30 seconds.\n\n"
-        "<b>Step 1 of 4</b>\n\n"
+        "<b>Step 1 of 7</b>\n\n"
         "\U0001f464 <b>What's your name?</b>",
         parse_mode='HTML'
     )
@@ -486,7 +498,7 @@ async def h_name(message: types.Message, state: FSMContext):
     await state.update_data(name=name, username=message.from_user.username or '')
     await state.set_state(Signup.gender)
     msg = await message.answer(
-        "<b>Step 2 of 4</b>\n\n"
+        "<b>Step 2 of 7</b>\n\n"
         "\u2696\ufe0f <b>What's your gender?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
@@ -515,7 +527,7 @@ async def h_gender(message: types.Message, state: FSMContext):
     await state.update_data(gender=GENDER_KW[keyword])
     await state.set_state(Signup.preferred)
     msg = await message.answer(
-        "<b>Step 3 of 4</b>\n\n"
+        "<b>Step 3 of 7</b>\n\n"
         "\U0001f49d <b>Who are you interested in?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
@@ -548,7 +560,7 @@ async def h_preferred(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
     await state.set_state(Signup.location)
     msg = await message.answer(
-        "<b>Step 4 of 4</b>\n\n"
+        "<b>Step 4 of 7</b>\n\n"
         "\U0001f4cd <b>Share your location</b> or type a place name:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
@@ -681,6 +693,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         'gender': data.get('gender', ''),
         'preferred_gender': data.get('preferred', ''),
         'bio': data.get('bio', ''),
+        'dob': data.get('dob', ''),
         'lat': data.get('lat', ''),
         'lon': data.get('lon', ''),
         'location_name': data.get('location_name', ''),
@@ -694,12 +707,16 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     user_profiles[uid] = prof
     await save_all()
     ref = data.get('ref_code')
+    ref_valid = False
     if ref:
-        await credit_referrer(ref, uid)
+        ref_valid = await credit_referrer(ref, uid)
     await state.clear()
+    msg_text = "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof)
+    if ref and not ref_valid:
+        msg_text += "\n\n⚠️ <i>That referral code wasn't valid.</i>"
     await bot.send_message(
         chat_id,
-        "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof),
+        msg_text,
         parse_mode='HTML', reply_markup=main_kb()
     )
 
@@ -712,7 +729,15 @@ async def h_bio(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
 
     if message.text and 'skip' in message.text.lower():
-        await finish_signup(state, message.chat.id, uid)
+        await state.set_state(Signup.dob)
+        msg = await message.answer(
+            "\U0001f4cc <b>When were you born?</b> (optional)\n\nEnter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
+            ])
+        )
+        await state.update_data(prev_bot_msg=msg.message_id)
         return
 
     bio = (message.text or '').strip()
@@ -720,7 +745,62 @@ async def h_bio(message: types.Message, state: FSMContext):
         if len(bio) > 300:
             bio = bio[:300]
         await state.update_data(bio=bio)
+    await state.set_state(Signup.dob)
+    msg = await message.answer(
+        "\U0001f4cc <b>When were you born?</b> (optional)\n\nEnter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
+        ])
+    )
+    await state.update_data(prev_bot_msg=msg.message_id)
+
+
+@dp.message(StateFilter(Signup.dob))
+async def h_dob(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    await mark_online(uid)
+    d = await state.get_data()
+    if d.get('prev_bot_msg'):
+        await safe_delete(message.chat.id, d['prev_bot_msg'])
+
+    raw = (message.text or '').strip()
+    if not raw or 'skip' in raw.lower():
+        await finish_signup(state, message.chat.id, uid)
+        return
+
+    dob = parse_dob(raw)
+    if dob is None:
+        await message.answer(
+            "\u26a0\ufe0f <b>Couldn't understand that date.</b>\n\n"
+            "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
+            ])
+        )
+        return
+
+    age = calc_age(dob)
+    if age < 18:
+        await message.answer(
+            "\u26d4\ufe0f <b>You must be 18+ to use this bot.</b>",
+            parse_mode='HTML'
+        )
+        return
+    if age > 100:
+        await message.answer(
+            "\u26a0\ufe0f <b>Please enter a valid birth year.</b>",
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
+            ])
+        )
+        return
+
+    await state.update_data(dob=raw)
     await finish_signup(state, message.chat.id, uid)
+
 
 @dp.message(lambda m: m.photo and m.from_user.id in user_profiles, StateFilter(None))
 async def h_profile_photo(message: types.Message, state: FSMContext):
@@ -925,7 +1005,21 @@ async def verify_start(cb: types.CallbackQuery):
 async def h_verify_photo(message: types.Message):
     uid = message.from_user.id
     step = _verify_pending.get(uid)
-    if not step or not message.photo:
+    if not step:
+        return
+    if not message.photo:
+        if step == 'awaiting_full_body':
+            await message.answer(
+                "\u26a0\ufe0f <b>Please send your full-body photo.</b>\n\n"
+                "This will be your profile picture. Make sure your full body is visible.",
+                parse_mode='HTML'
+            )
+        elif step == 'awaiting_selfie':
+            await message.answer(
+                "\u26a0\ufe0f <b>Please send a selfie.</b>\n\n"
+                "Take a photo looking straight at the camera. This is only visible to our admin team.",
+                parse_mode='HTML'
+            )
         return
     fid = message.photo[-1].file_id
     if step == 'awaiting_full_body':
@@ -1109,7 +1203,7 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     ph = partner.get('photo')
     txt = (
         f"\U0001f389 <b>It's a Match!</b>\n\n"
-        f"You and <b>{n}</b> liked each other!\n\n"
+        f"We found you a match with <b>{n}</b>!\n\n"
         f"\U0001f464 {n}{vb}\n"
         f"\u2696\ufe0f {g}\n"
         f"\U0001f4dd {b}\n\n"
@@ -1266,7 +1360,7 @@ async def relay(message: types.Message, state: FSMContext):
     pid = current_chat[uid]
     if not check_text_quota(uid):
         p = user_profiles[uid]
-        if p.get('gender') in ('Male', 'Female') and not p.get('verified'):
+        if p.get('gender') in ('Male', 'Female', 'Other') and not p.get('verified'):
             await message.answer(
                 "⚠️ <b>You've used all your free texts.</b>\n\n"
                 "📸 Verify your profile for free unlimited access.",
@@ -1499,6 +1593,24 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
+@dp.callback_query(lambda cb: cb.data == 'edit_dob')
+async def edit_dob(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
+    current_dob = user_profiles.get(uid, {}).get('dob', '')
+    await state.set_state(EditProfile.dob)
+    await cb.message.edit_text(
+        f"\u270f\ufe0f <b>Edit Date of Birth</b>\n\nCurrent: {current_dob or 'Not set'}\n\n"
+        "Enter your date of birth in any format (e.g. 15-08-1998):",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.answer()
+
 @dp.callback_query(lambda cb: cb.data == 'edit_photo')
 async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
@@ -1525,7 +1637,7 @@ async def cb_signup_gender(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(gender=gender)
     await state.set_state(Signup.preferred)
     await cb.message.edit_text(
-        "<b>Step 3 of 4</b>\n\n"
+        "<b>Step 3 of 7</b>\n\n"
         "\U0001f49d <b>Who are you interested in?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
@@ -1547,7 +1659,7 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
         await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
     await state.set_state(Signup.location)
     await cb.message.edit_text(
-        "<b>Step 4 of 4</b>\n\n"
+        "<b>Step 4 of 7</b>\n\n"
         "\U0001f4cd <b>Share your location</b> or type a place name:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
@@ -1607,8 +1719,25 @@ async def cb_skip_bio(cb: types.CallbackQuery, state: FSMContext):
     if d.get('prev_bot_msg'):
         await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
     await state.update_data(bio='')
+    await state.set_state(Signup.dob)
+    await cb.message.edit_text(
+        "\U0001f4cc <b>When were you born?</b> (optional)\n\nEnter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_dob")],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'signup_skip_dob')
+async def cb_skip_dob(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    d = await state.get_data()
+    if d.get('prev_bot_msg'):
+        await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
+    await state.update_data(dob='')
     await finish_signup(state, cb.message.chat.id, uid)
-    await state.clear()
     await cb.answer()
 
 
@@ -1820,6 +1949,39 @@ async def edit_photo_h(message: types.Message, state: FSMContext):
     ]))
 
 
+@dp.message(StateFilter(EditProfile.dob))
+async def h_edit_dob(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    await mark_online(uid)
+    raw = (message.text or '').strip()
+    if not raw:
+        await state.clear()
+        await message.answer("\u2705 DOB cleared.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+        ]))
+        return
+    dob = parse_dob(raw)
+    if dob is None:
+        await message.answer(
+            "\u26a0\ufe0f <b>Couldn't understand that date.</b>\n\nTry: 15-08-1998  |  1998/08/15  |  August 15 1998",
+            parse_mode='HTML'
+        )
+        return
+    age = calc_age(dob)
+    if age < 18:
+        await message.answer("\u26d4\ufe0f <b>You must be 18+ to use this bot.</b>", parse_mode='HTML')
+        return
+    if age > 100:
+        await message.answer("\u26a0\ufe0f <b>Please enter a valid birth year.</b>", parse_mode='HTML')
+        return
+    user_profiles[uid]['dob'] = raw
+    await save_all()
+    await state.clear()
+    await message.answer(f"✅ DOB updated! Age: {age}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
+    ]))
+
+
 # ─── Background Tasks ────────────────────────────────────────────────────────
 
 QUEUE_TIMEOUT = 240  # 4 minutes
@@ -1880,8 +2042,6 @@ async def check_queue_loop():
                     active_matches.setdefault(pid, {})
                     active_matches[uid][pid] = {'status': 'matched'}
                     active_matches[pid][uid] = {'status': 'matched'}
-                    consume_match(uid)
-                    consume_match(pid)
                     for x in (uid, pid):
                         if x in waiting_queue:
                             del waiting_queue[x]
@@ -1997,11 +2157,22 @@ async def auto_setup_webhook():
 
 async def on_startup(dispatcher: Dispatcher):
     logger.info("Starting Winkly Bot v2...")
+    # Menu button (left of emoji bar) showing bot commands
+    from aiogram.types import BotCommand
+    commands = [
+        BotCommand(command="start", description="Start or restart the bot"),
+        BotCommand(command="profile", description="View your profile"),
+        BotCommand(command="find", description="Find matches"),
+        BotCommand(command="stop", description="End current chat"),
+        BotCommand(command="verify", description="Get verified for unlimited access"),
+        BotCommand(command="premium", description="View premium plans"),
+        BotCommand(command="refer", description="Refer friends for free premium"),
+    ]
     try:
-        await bot.delete_my_commands()
-        logger.info("Menu button removed")
+        await bot.set_my_commands(commands)
+        logger.info("Menu button added")
     except Exception as e:
-        logger.warning(f"Failed to remove commands: {e}")
+        logger.warning(f"Failed to set commands: {e}")
 
     await init_storage()
     logger.info(f"Loaded {len(user_profiles)} profiles, {len(active_matches)} matches")
