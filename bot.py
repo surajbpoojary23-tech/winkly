@@ -908,7 +908,9 @@ async def cmd_verify(message: types.Message):
         await message.answer(
             "\u23f3 <b>Verification Under Review</b>\n\n"
             "Our team is checking your photos. You'll be notified once approved.",
-            parse_mode='HTML'
+            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f504 Re-Verify", callback_data='reverify')],
+            ])
         )
         return
     if st == 'rejected':
@@ -1018,6 +1020,32 @@ async def verify_start(cb: types.CallbackQuery):
         parse_mode='HTML'
     )
     await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'reverify')
+async def reverify(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if uid not in user_profiles:
+        await cb.message.edit_text("📝 Please set up your profile first with /start.")
+        await cb.answer()
+        return
+    # Reset pending verification
+    p = user_profiles[uid]
+    p['verification_status'] = 'none'
+    p.pop('selfie', None)
+    _verify_pending.pop(uid, None)
+    await save_all()
+    # Start fresh verification
+    _verify_pending[uid] = 'awaiting_photo'
+    await cb.message.edit_text(
+        "\U0001f4f7 <b>Verification</b>\n\n"
+        "Send a <b>clear photo</b> of yourself.\n\n"
+        "Any clear photo with a visible face will be accepted as your profile picture.",
+        parse_mode='HTML'
+    )
+    await cb.answer()
+
 
 async def h_verify_photo(message: types.Message):
     uid = message.from_user.id
