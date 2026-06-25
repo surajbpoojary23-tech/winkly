@@ -2217,7 +2217,7 @@ async def on_startup(dispatcher: Dispatcher):
         BotCommand(command="profile", description="View your profile"),
         BotCommand(command="find", description="Find matches"),
         BotCommand(command="stop", description="End current chat"),
-        BotCommand(command="verify", description="Get verified for unlimited access"),
+        BotCommand(command="verify", description="Get Verified"),
         BotCommand(command="premium", description="View premium plans"),
         BotCommand(command="refer", description="Refer friends for free premium"),
     ]
