@@ -26,23 +26,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardBu
 from aiogram.filters.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# Lazy-import face_recognition — only needed for photo verification
-def _faces_found(photo_path: str) -> bool:
-    """Return True if at least one face is detected in the photo file."""
-    try:
-        import face_recognition
-        import numpy as np
-        from PIL import Image
-
-        img = Image.open(photo_path)
-        arr = np.array(img.convert('RGB'))
-        encodings = face_recognition.face_encodings(arr)
-        return len(encodings) > 0
-    except Exception as e:
-        logger.warning(f"face_recognition check failed: {e}")
-        return False  # Fail open — accept if detection errors
-
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -1060,36 +1043,6 @@ async def h_verify_photo(message: types.Message):
         )
         return
     fid = message.photo[-1].file_id
-    # Download photo to temp file for face detection
-    tmp_path = f"/tmp/verify_{uid}.jpg"
-    try:
-        await bot.download(fid, destination=tmp_path)
-    except Exception as e:
-        logger.warning(f"Failed to download photo for verification: {e}")
-        await message.answer(
-            "\u26a0\ufe0f Could not download photo. Please try again.",
-            parse_mode='HTML'
-        )
-        return
-    # Check for face
-    if not _faces_found(tmp_path):
-        import os
-        try:
-            os.remove(tmp_path)
-        except:
-            pass
-        await message.answer(
-            "\U0001f914 <b>No face detected.</b>\n\n"
-            "Please send a <b>clear photo of yourself</b> with your face visible.",
-            parse_mode='HTML'
-        )
-        return
-    # Face found — accept
-    import os
-    try:
-        os.remove(tmp_path)
-    except:
-        pass
     user_profiles[uid]['photo'] = fid
     user_profiles[uid]['verified'] = True
     user_profiles[uid]['verification_status'] = 'verified'
