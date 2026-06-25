@@ -161,7 +161,7 @@ class EditProfile(StatesGroup):
 
 GENDER_NORM = {'male':'Male','female':'Female','other':'Other','men':'Male','women':'Female','m':'Male','f':'Female',
                 '\U0001f468\u200d\U0001f3fb':'Male','\U0001f469\u200d\U0001f3fb':'Female','\u2695\ufe0f':'Other',
-                '\U0001f468 Men':'Male','\U0001f469 Women':'Female','\U0001f465 Everyone':'Everyone',
+                '\U0001f468 Male':'Male','\U0001f469 Female':'Female','\U0001f465 Everyone':'Everyone',
                 '\U0001f468\u200d\U0001f3eb':'Male','\U0001f469\u200d\U0001f3fb':'Female','\U0001f465':'Everyone'}
 
 def norm_gender(g: str) -> str:
@@ -268,7 +268,7 @@ def is_premium(uid: int) -> bool:
 def is_verified_female(uid: int) -> bool:
     """Verified females get unlimited free access (bypass text limits)."""
     p = user_profiles.get(uid)
-    return bool(p and p.get('verified') and p.get('gender') in ('Women', 'Female'))
+    return bool(p and p.get('verified') and 'Female' in (p.get('gender', ''),))
 
 def check_text_quota(uid: int) -> bool:
     """Check if user can send a message (free texts remaining, premium, or verified female)."""
@@ -539,11 +539,12 @@ async def h_preferred(message: types.Message, state: FSMContext):
     raw = message.text.strip()
     nfd = unicodedata.normalize('NFD', raw.lower())
     keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
-    PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
+    PREF_KW = {'male': 'Male', 'female': 'Female', 'everyone': 'Everyone',
+                'men': 'Male', 'women': 'Female'}
     if keyword not in PREF_KW:
         kb2 = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text='\U0001f468 Men'), KeyboardButton(text='\U0001f469 Women')],
+                [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
                 [KeyboardButton(text='\U0001f465 Everyone')],
             ], resize_keyboard=True, one_time_keyboard=True
         )
@@ -1603,11 +1604,12 @@ async def edit_preferred_h(message: types.Message, state: FSMContext):
     raw = message.text.strip()
     nfd = unicodedata.normalize('NFD', raw.lower())
     keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
-    PREF_KW = {'men': 'Men', 'women': 'Women', 'everyone': 'Everyone'}
+    PREF_KW = {'male': 'Male', 'female': 'Female', 'everyone': 'Everyone',
+                'men': 'Male', 'women': 'Female'}
     if keyword not in PREF_KW:
         kb2 = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text='\U0001f468 Men'), KeyboardButton(text='\U0001f469 Women')],
+                [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
                 [KeyboardButton(text='\U0001f465 Everyone')],
             ], resize_keyboard=True, one_time_keyboard=True
         )
