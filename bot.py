@@ -1285,26 +1285,19 @@ async def do_match(cb: types.CallbackQuery):
 async def send_match_card(cid: int, partner: dict, pid: int):
     n = partner.get('name', '?')
     g = partner.get('gender', '?')
-    b = (partner.get('bio') or '—')[:100]
-    vb = " \u2705" if partner.get('verified') else ""
     ph = partner.get('photo')
     txt = (
-        f"\U0001f389 <b>It's a Match!</b>\n\n"
-        f"\U0001f464 <b>{n}{vb}</b>\n"
-        f"\u2696\ufe0f {g} | {n}\n"
-        f"\U0001f4dd {b}\n\n"
-        "Tap below to start chatting or skip:"
+        f"\U0001f389 <b>You matched with</b> {n}\n"
+        f"\u2696\ufe0f {g}"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f4ac  Chat Now", callback_data=f'chat:{pid}')],
-        [InlineKeyboardButton(text="\U0001f51b Skip", callback_data=f'skip_match:{pid}')],
     ])
     if ph:
         try:
-            # Step 1: send photo as profile thumbnail (full-width square crop)
-            await bot.send_photo(cid, ph, caption=f"\U0001f464 <b>{n}</b>", parse_mode='HTML')
-            # Step 2: send match info card
-            await bot.send_message(cid, txt, parse_mode='HTML', reply_markup=kb)
+            # Send small square thumbnail + text in one message
+            await bot.send_photo(cid, ph, caption=txt, parse_mode='HTML',
+                                reply_markup=kb)
             return
         except:
             pass
