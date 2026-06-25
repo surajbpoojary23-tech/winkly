@@ -1733,6 +1733,49 @@ async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
+
+# === DOB year picker callbacks ===
+@dp.callback_query(lambda cb: cb.data.startswith('signup_dob:'))
+async def cb_signup_dob(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    d = await state.get_data()
+    year = int(cb.data.split(':')[1])
+    await state.update_data(dob=str(year), prev_bot_msg=None)
+    await state.set_state(Signup.gender)
+    await cb.message.edit_text(
+        "<b>Step 3 of 6</b>\n\n"
+        "\u2696\ufe0f <b>What's your gender?</b>",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
+            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+        ])
+    )
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data.startswith('dob_page:'))
+async def cb_signup_dob_page(cb: types.CallbackQuery):
+    page = int(cb.data.split(':')[1])
+    try:
+        await cb.message.edit_reply_markup(reply_markup=dob_picker_kb(page))
+    except:
+        pass
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data == 'dob_manual')
+async def cb_signup_dob_manual(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    await state.set_state(Signup.dob)
+    await cb.message.edit_text(
+        "\u26a0\ufe0f <b>Please enter your date of birth.</b>\n\n"
+        "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
+        parse_mode='HTML'
+    )
+    await cb.answer()
+
+
 # === Signup inline button callbacks ===
 
 @dp.callback_query(lambda cb: cb.data.startswith('signup_gender:'))
@@ -1740,7 +1783,7 @@ async def cb_signup_gender(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     gender = cb.data.split(':', 1)[1]
-    await state.update_data(gender=gender)
+    await state.update_data(gender=gender, prev_bot_msg=None)
     await state.set_state(Signup.preferred)
     await cb.message.edit_text(
         "<b>Step 4 of 6</b>\n\n"
@@ -1759,7 +1802,7 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     preferred = cb.data.split(':', 1)[1]
-    await state.update_data(preferred=preferred)
+    await state.update_data(preferred=preferred, prev_bot_msg=None)
     await state.set_state(Signup.location)
     await cb.message.edit_text(
         "<b>Step 5 of 6</b>\n\n"
@@ -1769,7 +1812,6 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⌨️  Enter Place Name", callback_data="loc_enter_text")],
         ])
     )
-    await state.update_data(prev_bot_msg=cb.message.message_id)
     await cb.answer()
 
 
