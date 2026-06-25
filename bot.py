@@ -80,7 +80,7 @@ async def get_redis():
     return _redis
 
 async def init_storage():
-    global user_profiles, active_matches, likes_sent, waiting_queue, user_usage, premium_subscriptions, current_chat
+    global user_profiles, active_matches, likes_sent, waiting_queue, premium_subscriptions, current_chat
     r = await get_redis()
     if r is None:
         logger.info("Storage: in-memory only (Redis unavailable)")
@@ -89,7 +89,6 @@ async def init_storage():
         ('winkly:profiles',  user_profiles),
         ('winkly:matches',   active_matches),
         ('winkly:queue',    waiting_queue),
-        ('winkly:usage',    user_usage),
         ('winkly:premium',  premium_subscriptions),
         ('winkly:chat',     current_chat),
     ]:
@@ -119,7 +118,6 @@ async def save_all():
         await r.set('winkly:profiles',  json.dumps(user_profiles))
         await r.set('winkly:matches',   json.dumps(active_matches))
         await r.set('winkly:queue',     json.dumps(waiting_queue))
-        await r.set('winkly:usage',     json.dumps(user_usage))
         await r.set('winkly:premium',   json.dumps(premium_subscriptions))
         await r.set('winkly:chat',      json.dumps(current_chat))
         await r.set('winkly:likes',     json.dumps({k: list(v) for k, v in likes_sent.items()}))
@@ -131,7 +129,6 @@ user_profiles: Dict[int, dict] = {}
 active_matches: Dict[int, Dict[int, dict]] = {}
 likes_sent: Dict[int, Set[int]] = {}
 waiting_queue: Dict[int, dict] = {}
-user_usage: Dict[int, dict] = {}
 premium_subscriptions: Dict[int, dict] = {}
 current_chat: Dict[int, int] = {}
 _verify_pending: Dict[int, str] = {}
@@ -246,19 +243,11 @@ async def get_online_count() -> int:
         return c
     except: return len(user_profiles)
 
-DAILY_TEXT_LIMIT = 20; DAILY_MATCH_LIMIT = 10
+FREE_TEXTS_JOINING = 30  # One-time free texts for new users
 
 def _reset_daily(uid: int):
-    now = datetime.now()
-    if uid not in user_usage:
-        user_usage[uid] = {'texts': 0, 'matches': 0, 'last_reset': now.isoformat()}; return
-    last_str = user_usage[uid].get('last_reset')
-    if not last_str: user_usage[uid]['last_reset'] = now.isoformat(); return
-    try:
-        last = datetime.fromisoformat(last_str)
-    except: user_usage[uid]['last_reset'] = now.isoformat(); return
-    if last.date() < now.date():
-        user_usage[uid]['texts'] = 0; user_usage[uid]['matches'] = 0; user_usage[uid]['last_reset'] = now.isoformat()
+    """No-op kept for backward compat if called elsewhere."""
+    pass
 
 def is_premium(uid: int) -> bool:
     if uid not in premium_subscriptions: return False
@@ -268,25 +257,29 @@ def is_premium(uid: int) -> bool:
     except: return False
 
 def is_verified_female(uid: int) -> bool:
-    """Verified females get unlimited free access (bypass daily limits)."""
+    """Verified females get unlimited free access (bypass text limits)."""
     p = user_profiles.get(uid)
     return bool(p and p.get('verified') and p.get('gender') in ('Women', 'Female'))
 
 def check_text_quota(uid: int) -> bool:
-    _reset_daily(uid); return is_premium(uid) or is_verified_female(uid) or user_usage[uid]['texts'] < DAILY_TEXT_LIMIT
+    """Check if user can send a message (free texts remaining, premium, or verified female)."""
+    p = user_profiles.get(uid)
+    if not p: return False
+    if is_premium(uid) or is_verified_female(uid):
+        return True
+    return p.get('free_texts', 0) > 0
 
 def check_match_quota(uid: int) -> bool:
-    _reset_daily(uid); return is_premium(uid) or is_verified_female(uid) or user_usage[uid]['matches'] < DAILY_MATCH_LIMIT
+    """Unlimited matching — no limit."""
+    return True
 
 def consume_text(uid: int):
-    _reset_daily(uid)
-    if not is_premium(uid) and not is_verified_female(uid):
-        user_usage[uid]['texts'] = user_usage[uid].get('texts', 0) + 1
-
-def consume_match(uid: int):
-    _reset_daily(uid)
-    if not is_premium(uid) and not is_verified_female(uid):
-        user_usage[uid]['matches'] = user_usage[uid].get('matches', 0) + 1
+    """Consume one free text (if not premium/verified female)."""
+    p = user_profiles.get(uid)
+    if not p: return
+    if is_premium(uid) or is_verified_female(uid):
+        return
+    p['free_texts'] = max(0, p.get('free_texts', 0) - 1)
 
 def quota_summary(uid: int) -> str:
     if is_premium(uid):
@@ -297,11 +290,11 @@ def quota_summary(uid: int) -> str:
         except: return "PREMIUM ACTIVE - Unlimited!"
     if is_verified_female(uid):
         return "VERIFIED FEMALE - Unlimited free access!"
-    _reset_daily(uid)
-    u = user_usage.get(uid, {'texts': 0, 'matches': 0})
-    tl = max(0, DAILY_TEXT_LIMIT - u.get('texts', 0))
-    ml = max(0, DAILY_MATCH_LIMIT - u.get('matches', 0))
-    return f"FREE - {tl} texts, {ml} matches left today. Upgrade from Rs49/day"
+    p = user_profiles.get(uid, {})
+    ft = p.get('free_texts', 0)
+    if ft > 0:
+        return f"FREE - {ft} free texts left. Upgrade from Rs49/day for unlimited."
+    return "FREE LIMIT REACHED - Upgrade from Rs49/day for unlimited texts."
 
 def referral_code(uid: int) -> str:
     return hashlib.md5(f"winkly_{uid}_ref".encode()).hexdigest()[:8].upper()
@@ -314,7 +307,6 @@ async def referral_count(uid: int) -> int:
 async def award_free_premium(uid: int):
     exp = datetime.now() + timedelta(days=1)
     premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
-    if uid in user_usage: del user_usage[uid]
     await save_all()
     try:
         await bot.send_message(uid,
@@ -342,9 +334,12 @@ def find_compat(me: dict, all_profiles: Dict[int, dict]):
     my_pref = norm_gender(me.get('preferred_gender', ''))
     my_g = norm_gender(me.get('gender', ''))
     pool = {'Men','Women','Other'} if my_pref == 'Everyone' else {norm_gender(my_pref)}
+    rejected = set(me.get('rejected', []))
+    my_uid = me.get('_uid')
     results = []
     for uid, other in all_profiles.items():
-        if uid == me.get('_uid') or not other.get('lat'): continue
+        if uid == my_uid or not other.get('lat'): continue
+        if uid in rejected: continue
         og = norm_gender(other.get('gender', '')); op = norm_gender(other.get('preferred_gender', ''))
         if og not in pool: continue
         if op != 'Everyone' and my_g not in {op}: continue
@@ -656,6 +651,8 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         'verified': False,
         'verification_status': 'none',
         'username': data.get('username', ''),
+        'free_texts': FREE_TEXTS_JOINING,
+        'rejected': [],
     }
     user_profiles[uid] = prof
     await save_all()
@@ -666,7 +663,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     await bot.send_message(
         chat_id,
         "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof) +
-        "\n\n<blockquote>You have 20 free texts and 10 matches per day. "
+        f"\n\n<blockquote>You have {FREE_TEXTS_JOINING} free texts to use with any matches. "
         "Premium unlocks unlimited!</blockquote>",
         parse_mode='HTML', reply_markup=main_kb()
     )
@@ -1015,29 +1012,6 @@ async def do_match(cb: types.CallbackQuery):
         await cb.message.edit_text("⚠️ No profile found. Please send /start.")
         await cb.answer()
         return
-    if not check_match_quota(uid):
-        p = user_profiles[uid]
-        if p.get('gender') in ('Women', 'Female') and not p.get('verified'):
-            await cb.message.edit_text(
-                "⚠️ <b>You've reached your free limit.</b>\n\n"
-                "📸 Verify your profile to continue (free & unlimited).",
-                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
-                    [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
-                ])
-            )
-        else:
-            await cb.message.edit_text(
-                f"⚠️ <b>You've reached your free match limit.</b>\n\n{quota_summary(uid)}\n\n"
-                "\U0001f3c6 Upgrade to continue:",
-                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
-                    [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
-                    [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
-                ])
-            )
-        await cb.answer()
-        return
     me = user_profiles[uid]
     m = find_queue_match(me)
     if m:
@@ -1046,8 +1020,6 @@ async def do_match(cb: types.CallbackQuery):
         active_matches.setdefault(pid, {})
         active_matches[uid][pid] = {'status': 'matched'}
         active_matches[pid][uid] = {'status': 'matched'}
-        consume_match(uid)
-        consume_match(pid)
         for x in (uid, pid):
             if x in waiting_queue:
                 del waiting_queue[x]
@@ -1069,7 +1041,10 @@ async def do_match(cb: types.CallbackQuery):
         "This usually takes 5-30 seconds.\n\n"
         "\u23f3 <b>Waiting in queue...</b>\n\n"
         "_You'll be notified when a match is found._",
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f504 Cancel Search", callback_data='cancel_queue')],
+        ])
     )
     _queue_msg_ids[uid] = sm.message_id
     await save_all()
@@ -1087,10 +1062,11 @@ async def send_match_card(cid: int, partner: dict, pid: int):
         f"\U0001f464 {n}{vb}\n"
         f"\u2696\ufe0f {g}\n"
         f"\U0001f4dd {b}\n\n"
-        "Tap below to start chatting:"
+        "Tap below to start chatting or skip:"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f4ac  Chat Now", callback_data=f'chat:{pid}')],
+        [InlineKeyboardButton(text="\U0001f51b Skip", callback_data=f'skip_match:{pid}')],
     ])
     if ph:
         try:
@@ -1101,6 +1077,28 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     await bot.send_message(cid, txt, parse_mode='HTML', reply_markup=kb)
 
 # ─── Chat ────────────────────────────────────────────────────────────────────
+
+@dp.callback_query(lambda cb: cb.data.startswith('skip_match:'))
+async def skip_match(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    pid = int(cb.data.split(':')[1])
+    p = user_profiles.get(uid)
+    if p:
+        if 'rejected' not in p:
+            p['rejected'] = []
+        if pid not in p['rejected']:
+            p['rejected'].append(pid)
+            await save_all()
+    # Remove from active_matches if present
+    active_matches.get(uid, {}).pop(pid, None)
+    active_matches.get(pid, {}).pop(uid, None)
+    await cb.message.edit_text(
+        "\u274c <b>Skipped.</b> You won't be matched with this person again.\n\n"
+        "What would you like to do next?",
+        parse_mode='HTML', reply_markup=reengage_kb()
+    )
+    await cb.answer()
 
 @dp.callback_query(lambda cb: cb.data.startswith('chat:'))
 async def start_chat(cb: types.CallbackQuery):
@@ -1156,6 +1154,21 @@ async def say_hi(cb: types.CallbackQuery):
         pass
     await cb.answer()
 
+@dp.callback_query(lambda cb: cb.data == 'cancel_queue')
+async def cancel_queue(cb: types.CallbackQuery):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if uid in waiting_queue:
+        del waiting_queue[uid]
+    if uid in _queue_msg_ids:
+        await safe_delete(uid, _queue_msg_ids.pop(uid))
+    await cb.message.edit_text(
+        "\U0001f504 <b>Search cancelled.</b>\n\nWhat would you like to do next?",
+        parse_mode='HTML', reply_markup=reengage_kb()
+    )
+    await save_all()
+    await cb.answer()
+
 @dp.callback_query(lambda cb: cb.data == 'end_chat')
 async def end_chat(cb: types.CallbackQuery):
     uid = cb.from_user.id
@@ -1200,7 +1213,7 @@ async def relay(message: types.Message, state: FSMContext):
         p = user_profiles[uid]
         if p.get('gender') in ('Women', 'Female') and not p.get('verified'):
             await message.answer(
-                "⚠️ <b>You've reached your daily limit.</b>\n\n"
+                "⚠️ <b>You've used all your free texts.</b>\n\n"
                 "📸 Verify your profile for free unlimited access.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
@@ -1208,7 +1221,7 @@ async def relay(message: types.Message, state: FSMContext):
             )
         else:
             await message.answer(
-                f"⚠️ <b>You've reached your daily limit.</b>\n\n{quota_summary(uid)}\n\n"
+                f"⚠️ <b>You've used all your free texts.</b>\n\n{quota_summary(uid)}\n\n"
                 "\U0001f3c6 Upgrade to continue:",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
@@ -1216,22 +1229,7 @@ async def relay(message: types.Message, state: FSMContext):
                 ])
             )
         return
-    if not check_text_quota(pid):
-        sn = user_profiles[uid]['name']
-        consume_text(uid)
-        await save_all()
-        try:
-            await bot.send_message(
-                pid,
-                f"\U0001f4ac <b>{sn}</b> sent you a message but you've reached your daily limit.\n\n"
-                "\U0001f3c6 Upgrade to read and reply to all messages!",
-                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 Upgrade — Rs49/day", callback_data='premium_1day')],
-                ])
-            )
-        except:
-            pass
-        return
+    # Receiver can always receive messages — no quota check
     try:
         await bot.copy_message(pid, message.chat.id, message.message_id)
         consume_text(uid)
@@ -1683,14 +1681,11 @@ async def handle_razorpay_webhook(request):
             dur = int(dur_s)
             exp = datetime.now() + timedelta(days=dur)
             premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
-            if uid in user_usage:
-                del user_usage[uid]
             _processed_payments.add(payment_id)
             r = await get_redis()
             if r:
                 try:
                     await r.set('winkly:premium', json.dumps(premium_subscriptions))
-                    await r.set('winkly:usage', json.dumps(user_usage))
                     await r.set('winkly:processed', json.dumps(list(_processed_payments)))
                 except Exception as e:
                     logger.warning(f"Webhook Redis save failed: {e}")
