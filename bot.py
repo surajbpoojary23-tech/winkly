@@ -1377,6 +1377,11 @@ async def edit_p(cb: types.CallbackQuery, state: FSMContext):
 async def edit_n(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    # Guard: don't activate during signup
+    st = await state.get_state()
+    if st and st.startswith('Signup:'):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
     await state.set_state(EditProfile.name)
     await cb.message.edit_text(
         "\u270f\ufe0f <b>Edit Name</b>\n\nWhat's your new name?",
@@ -1390,6 +1395,10 @@ async def edit_n(cb: types.CallbackQuery, state: FSMContext):
 async def edit_b(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    st = await state.get_state()
+    if st and st.startswith('Signup:'):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
     await state.set_state(EditProfile.bio)
     await cb.message.edit_text(
         "\u270f\ufe0f <b>Edit Bio</b>\n\nTell us about yourself:",
@@ -1399,10 +1408,18 @@ async def edit_b(cb: types.CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
+async def _guard_edit(state: FSMContext) -> bool:
+    """Returns True if in Signup state (should block)."""
+    st = await state.get_state()
+    return bool(st and st.startswith('Signup:'))
+
 @dp.callback_query(lambda cb: cb.data == 'edit_gender_preferred')
 async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
     await state.set_state(EditProfile.gender)
     kb = ReplyKeyboardMarkup(
         keyboard=[
@@ -1421,6 +1438,9 @@ async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
 async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
     await state.set_state(EditProfile.location)
     await state.update_data(is_editing=True)
     kb = ReplyKeyboardMarkup(
@@ -1439,6 +1459,9 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
 async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
     await state.set_state(EditProfile.photo)
     await cb.message.edit_text(
         "\u270f\ufe0f <b>Change Photo</b>\n\nSend a new profile photo:",
@@ -1453,16 +1476,20 @@ async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
 async def edit_name_h(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
-    name = message.text.strip()
-    if len(name) < 2:
-        await message.answer("⚠️ Name must be at least 2 characters.")
-        return
-    user_profiles[uid]['name'] = name
-    await save_all()
-    await state.clear()
-    await message.answer("\u2705 Name updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
-    ]))
+    try:
+        name = (message.text or '').strip()
+        if len(name) < 2:
+            await message.answer("⚠️ Name must be at least 2 characters.")
+            return
+        user_profiles[uid]['name'] = name
+        await save_all()
+        await state.clear()
+        await message.answer("\u2705 Name updated to " + name + "!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
+        ]))
+    except Exception as e:
+        logger.error(f"edit_name_h failed for {uid}: {e}")
+        await message.answer("⚠️ Something went wrong. Please try again.")
 
 @dp.message(StateFilter(EditProfile.bio))
 async def edit_bio_h(message: types.Message, state: FSMContext):
