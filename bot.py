@@ -634,12 +634,12 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
-    await state.set_state(Signup.photo)
+    await state.set_state(Signup.bio)
     msg = await message.answer(
-        "📸 <b>Add a photo</b> (optional) — send one now or tap Skip:",
+        "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_photo")],
+            [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
