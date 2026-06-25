@@ -542,11 +542,11 @@ async def h_name(message: types.Message, state: FSMContext):
     await state.update_data(name=name, username=message.from_user.username or '')
     await state.set_state(Signup.dob)
     msg = await message.answer(
-        "<b>Step 2 of 6</b>\n\n"
-        "\U0001f4c5 <b>What's your date of birth?</b>\n\n"
-        "Enter your date of birth in any format, e.g. 15-08-1998, 1998/08/15, or August 15 1998:",
-        parse_mode='HTML'
-    )
+            "<b>Step 2 of 6</b>\n\n"
+            "📅 <b>When were you born?</b>",
+            parse_mode='HTML',
+            reply_markup=dob_picker_kb(0)
+        )
     await state.update_data(prev_bot_msg=msg.message_id)
 
 
@@ -754,6 +754,29 @@ async def h_bio(message: types.Message, state: FSMContext):
 
 
 @dp.message(StateFilter(Signup.dob))
+
+def dob_picker_kb(page: int = 0) -> InlineKeyboardMarkup:
+    """Year picker: page 0 = recent years (2006-1987), page 1 = older (1986-1967), page 2 = oldest (1966-1950)"""
+    all_years = list(range(2006, 1949, -1))  # 2006 down to 1950
+    page_size = 20
+    start = page * page_size
+    page_years = all_years[start:start + page_size]
+    rows = []
+    for i in range(0, len(page_years), 4):
+        chunk = page_years[i:i+4]
+        rows.append([InlineKeyboardButton(text=str(y), callback_data=f'signup_dob:{y}') for y in chunk])
+    # Navigation
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text='◀️ Younger', callback_data='dob_page:0'))
+    if start + page_size < len(all_years):
+        nav.append(InlineKeyboardButton(text='Older ▶️', callback_data=f'dob_page:{page+1}'))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text='✏️ Type manually', callback_data='dob_manual')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 async def h_dob(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
