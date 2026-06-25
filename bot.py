@@ -433,17 +433,25 @@ async def safe_delete(chat_id: int, message_id: int):
         try: await bot.delete_message(chat_id, message_id)
         except: pass
 
-def main_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
+def main_kb(uid: int = None):
+    is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
+    rows = [
         [InlineKeyboardButton(text="FIND MATCHES", callback_data='do_match')],
         [InlineKeyboardButton(text="EDIT PROFILE", callback_data='edit_profile')],
-    ])
+    ]
+    if not is_female:
+        rows.append([InlineKeyboardButton(text="PREMIUM", callback_data='see_premium')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def reengage_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
+def reengage_kb(uid: int = None):
+    is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
+    rows = [
         [InlineKeyboardButton(text="FIND NEW MATCH", callback_data='do_match'),
          InlineKeyboardButton(text="MY PROFILE", callback_data='back_to_profile')],
-    ])
+    ]
+    if not is_female:
+        rows.append([InlineKeyboardButton(text="PREMIUM", callback_data='see_premium')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def edit_profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -503,7 +511,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         p = user_profiles[uid]
         await message.answer(
             profile_text(p) + f"\n\n{quota_summary(uid)}",
-            parse_mode='HTML', reply_markup=main_kb()
+            parse_mode='HTML', reply_markup=main_kb(uid)
         )
         return
     await state.set_state(Signup.name)
@@ -770,7 +778,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     await bot.send_message(
         chat_id,
         msg_text,
-        parse_mode='HTML', reply_markup=main_kb()
+        parse_mode='HTML', reply_markup=main_kb(uid)
     )
 
 @dp.message(StateFilter(Signup.bio))
@@ -866,7 +874,7 @@ async def h_profile_photo(message: types.Message, state: FSMContext):
         return  # Let relay() forward the photo to the chat partner
     user_profiles[uid]['photo'] = message.photo[-1].file_id
     await save_all()
-    await message.answer("\u2705 Profile photo updated!", reply_markup=main_kb())
+    await message.answer("\u2705 Profile photo updated!", reply_markup=main_kb(uid))
 
 # ─── /profile ────────────────────────────────────────────────────────────────
 
@@ -879,7 +887,7 @@ async def cmd_profile(message: types.Message):
         return
     await message.answer(
         profile_text(user_profiles[uid]),
-        parse_mode='HTML', reply_markup=main_kb()
+        parse_mode='HTML', reply_markup=main_kb(uid)
     )
 
 # ─── /find ──────────────────────────────────────────────────────────────────
@@ -922,7 +930,7 @@ async def cmd_stop(message: types.Message):
         except:
             pass
     await message.answer("\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
-                         parse_mode='HTML', reply_markup=reengage_kb())
+                         parse_mode='HTML', reply_markup=reengage_kb(uid))
 
 # ─── /verify ────────────────────────────────────────────────────────────────
 
@@ -939,14 +947,14 @@ async def cmd_verify(message: types.Message):
             await message.answer(
                 "\U0001f3c5 <b>Already Verified!</b>\n\n"
                 "\u2705 You have unlimited free access to chat.\n\nGo find your match! \u2764\ufe0f",
-                parse_mode='HTML', reply_markup=main_kb()
+                parse_mode='HTML', reply_markup=main_kb(uid)
             )
         else:
             await message.answer(
                 "\U0001f3c5 <b>Already Verified!</b>\n\n"
                 "\u2705 Your profile has a verified badge \u2714\ufe0f\n\n"
                 "Your match card will show the verified badge.",
-                parse_mode='HTML', reply_markup=main_kb()
+                parse_mode='HTML', reply_markup=main_kb(uid)
             )
         return
     st = p.get('verification_status', 'none')
@@ -996,11 +1004,11 @@ async def cmd_premium(message: types.Message):
             await message.answer(
                 f"\U0001f3c6 <b>Premium Active!</b>\n\nExpires in {days} day{'s' if days != 1 else ''}\n"
                 "\u2705 Unlimited texts and matches\n\nWhat would you like to do?",
-                parse_mode='HTML', reply_markup=main_kb()
+                parse_mode='HTML', reply_markup=main_kb(uid)
             )
         except:
             await message.answer("\U0001f3c6 <b>Premium Active!</b>\n\nUnlimited access!",
-                                 parse_mode='HTML', reply_markup=main_kb())
+                                 parse_mode='HTML', reply_markup=main_kb(uid))
         return
     await message.answer(
         f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
@@ -1125,13 +1133,13 @@ async def h_verify_photo(message: types.Message):
             "\u2705 <b>Verified!</b>\n\n"
             "Your profile photo is set. You now have unlimited free access to chat.\n\n"
             "Go find your match! \u2764\ufe0f",
-            parse_mode='HTML', reply_markup=main_kb()
+            parse_mode='HTML', reply_markup=main_kb(uid)
         )
     else:
         await message.answer(
             "\u2705 <b>Verified!</b>\n\n"
             "Your profile photo is set. Your match card will now show a verified badge \u2714\ufe0f.",
-            parse_mode='HTML', reply_markup=main_kb()
+            parse_mode='HTML', reply_markup=main_kb(uid)
         )
 
 async def send_verification_to_admin(uid: int):
@@ -1341,7 +1349,7 @@ async def skip_match(cb: types.CallbackQuery):
         uid,
         "\u274c <b>Skipped.</b> You won't be matched with this person again.\n\n"
         "What would you like to do next?",
-        parse_mode='HTML', reply_markup=reengage_kb()
+        parse_mode='HTML', reply_markup=reengage_kb(uid)
     )
     await cb.answer()
 
@@ -1452,7 +1460,7 @@ async def cancel_queue(cb: types.CallbackQuery):
         await safe_delete(uid, _queue_msg_ids.pop(uid))
     await cb.message.edit_text(
         "\U0001f504 <b>Search cancelled.</b>\n\nWhat would you like to do next?",
-        parse_mode='HTML', reply_markup=reengage_kb()
+        parse_mode='HTML', reply_markup=reengage_kb(uid)
     )
     await save_all()
     await cb.answer()
@@ -1475,7 +1483,7 @@ async def end_chat(cb: types.CallbackQuery):
             pass
     await cb.message.edit_text(
         "\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
-        parse_mode='HTML', reply_markup=reengage_kb()
+        parse_mode='HTML', reply_markup=reengage_kb(uid)
     )
     await save_all()
     await cb.answer()
@@ -1546,7 +1554,7 @@ async def prem_1(cb: types.CallbackQuery):
     await mark_online(uid)
     if is_premium(uid):
         await cb.message.edit_text("\U0001f3c6 <b>Already Premium!</b>\n\nYou have unlimited access.",
-                                    parse_mode='HTML', reply_markup=main_kb())
+                                    parse_mode='HTML', reply_markup=main_kb(uid))
         await cb.answer()
         return
     await cb.message.edit_text("\u23f3 Creating payment link...")
@@ -1624,7 +1632,7 @@ async def back_prem(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
     if is_premium(uid):
-        await cb.message.edit_text("\U0001f3c6 <b>Already Premium!</b>", parse_mode='HTML', reply_markup=main_kb())
+        await cb.message.edit_text("\U0001f3c6 <b>Already Premium!</b>", parse_mode='HTML', reply_markup=main_kb(uid))
     else:
         await cb.message.edit_text(
             f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
@@ -1651,7 +1659,7 @@ async def btp(cb: types.CallbackQuery):
         return
     await cb.message.edit_text(
         profile_text(user_profiles[uid]),
-        parse_mode='HTML', reply_markup=main_kb()
+        parse_mode='HTML', reply_markup=main_kb(uid)
     )
     await cb.answer()
 
