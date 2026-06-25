@@ -1267,7 +1267,7 @@ async def relay(message: types.Message, state: FSMContext):
     pid = current_chat[uid]
     if not check_text_quota(uid):
         p = user_profiles[uid]
-            if p.get('gender') in ('Male', 'Female') and not p.get('verified'):
+        if p.get('gender') in ('Male', 'Female') and not p.get('verified'):
             await message.answer(
                 "⚠️ <b>You've used all your free texts.</b>\n\n"
                 "📸 Verify your profile for free unlimited access.",
