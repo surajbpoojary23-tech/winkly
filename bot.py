@@ -685,9 +685,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     await state.clear()
     await bot.send_message(
         chat_id,
-        "🎉 <b>Profile complete!</b>\n\n" + profile_text(prof) +
-        f"\n\n<blockquote>You have {FREE_TEXTS_JOINING} free texts to use with any matches. "
-        "Premium unlocks unlimited!</blockquote>",
+        "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof),
         parse_mode='HTML', reply_markup=main_kb()
     )
 
