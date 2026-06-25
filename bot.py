@@ -993,11 +993,11 @@ async def verify_start(cb: types.CallbackQuery):
         await cb.message.edit_text("\u2705 You're already verified!")
         await cb.answer()
         return
-    _verify_pending[uid] = 'awaiting_full_body'
+    _verify_pending[uid] = 'awaiting_photo'
     await cb.message.edit_text(
-        "\U0001f4f7 <b>Verification — Step 1 of 2</b>\n\n"
-        "Send a <b>full-body photo</b> of yourself. This will be your profile picture.\n\n"
-        "_Make sure your full body is visible and lighting is good._",
+        "\U0001f4f7 <b>Verification</b>\n\n"
+        "Send a <b>clear photo</b> of yourself.\n\n"
+        "Any clear photo with a visible face will be accepted as your profile picture.",
         parse_mode='HTML'
     )
     await cb.answer()
@@ -1005,46 +1005,27 @@ async def verify_start(cb: types.CallbackQuery):
 async def h_verify_photo(message: types.Message):
     uid = message.from_user.id
     step = _verify_pending.get(uid)
-    if not step:
+    if not step or step != 'awaiting_photo':
         return
     if not message.photo:
-        if step == 'awaiting_full_body':
-            await message.answer(
-                "\u26a0\ufe0f <b>Please send your full-body photo.</b>\n\n"
-                "This will be your profile picture. Make sure your full body is visible.",
-                parse_mode='HTML'
-            )
-        elif step == 'awaiting_selfie':
-            await message.answer(
-                "\u26a0\ufe0f <b>Please send a selfie.</b>\n\n"
-                "Take a photo looking straight at the camera. This is only visible to our admin team.",
-                parse_mode='HTML'
-            )
+        await message.answer(
+            "\u26a0\ufe0f <b>Please send a photo.</b>\n\n"
+            "Any clear photo with a visible face will be accepted.",
+            parse_mode='HTML'
+        )
         return
     fid = message.photo[-1].file_id
-    if step == 'awaiting_full_body':
-        user_profiles[uid]['photo'] = fid
-        _verify_pending[uid] = 'awaiting_selfie'
-        await message.answer(
-            "\u2705 Great photo!\n\n"
-            "\U0001f4f7 <b>Step 2 of 2: Verification Selfie</b>\n\n"
-            "Now send a <b>selfie</b> looking straight at the camera. "
-            "This is only visible to our admin team.\n\n"
-            "_Keep your face clearly visible._",
-            parse_mode='HTML'
-        )
-    elif step == 'awaiting_selfie':
-        user_profiles[uid]['selfie'] = fid
-        user_profiles[uid]['verification_status'] = 'pending'
-        del _verify_pending[uid]
-        await save_all()
-        await send_verification_to_admin(uid)
-        await message.answer(
-            "\u2705 <b>Photos received!</b>\n\n"
-            "Our team will review your verification shortly. "
-            "You'll be notified once approved.\n\nThank you for your patience! \U0001f389",
-            parse_mode='HTML'
-        )
+    user_profiles[uid]['photo'] = fid
+    user_profiles[uid]['verified'] = True
+    user_profiles[uid]['verification_status'] = 'verified'
+    del _verify_pending[uid]
+    await save_all()
+    await message.answer(
+        "\u2705 <b>Verified!</b>\n\n"
+        "Your profile photo is set. You now have unlimited free access to chat.\n\n"
+        "Go find your match! \u2764\ufe0f",
+        parse_mode='HTML', reply_markup=main_kb()
+    )
 
 async def send_verification_to_admin(uid: int):
     if not ADMIN_CHAT_ID:
