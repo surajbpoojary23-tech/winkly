@@ -46,6 +46,24 @@ def _faces_found(image_path: str) -> bool:
         return True  # fail-open: accept on error
 
 
+async def _verify_face(uid: int, file_id: str) -> bool:
+    """Download a photo and check that a face is clearly visible. Returns True if OK (or download fails)."""
+    tmp_path = f"/tmp/verify_{uid}.jpg"
+    try:
+        await bot.download(file_id, destination=tmp_path)
+    except Exception as e:
+        logger.warning(f"Failed to download photo for verification: {e}")
+        return True  # fail-open
+    try:
+        return _faces_found(tmp_path)
+    finally:
+        try:
+            import os
+            os.remove(tmp_path)
+        except:
+            pass
+
+
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8624196108:***')
@@ -687,14 +705,30 @@ async def h_photo(message: types.Message, state: FSMContext):
         await message.answer("📸 Send a photo or tap Skip.")
         return
 
-    photo_id = message.photo[-1].file_id
-    await state.update_data(photo=photo_id)
+    fid = message.photo[-1].file_id
+    face_ok = await _verify_face(uid, fid)
+
+    update = {'photo': fid}
+    if face_ok:
+        update['verified'] = True
+        update['verification_status'] = 'verified'
+    await state.update_data(**update)
+
     await state.set_state(Signup.bio)
+    prefix = ""
+    gender = d.get('gender', '')
+    if face_ok:
+        if gender == 'Female':
+            prefix = "\u2705 <b>Verified!</b> You have unlimited free access.\n\n"
+        else:
+            prefix = "\u2705 <b>Verified!</b> Your match card will show a verified badge.\u2714\ufe0f\n\n"
+    else:
+        prefix = "\U0001f4f7 Photo saved.\n\n"
     msg = await message.answer(
-        "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+        f"{prefix}\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_bio")],
+            [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
@@ -717,8 +751,8 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         'lon': data.get('lon', ''),
         'location_name': data.get('location_name', ''),
         'photo': data.get('photo'),
-        'verified': False,
-        'verification_status': 'none',
+        'verified': data.get('verified', False),
+        'verification_status': data.get('verification_status', 'none'),
         'username': data.get('username', ''),
         'free_texts': FREE_TEXTS_JOINING,
         'rejected': [],
@@ -1071,30 +1105,13 @@ async def h_verify_photo(message: types.Message):
         )
         return
     fid = message.photo[-1].file_id
-    # Download photo for face detection
-    tmp_path = f"/tmp/verify_{uid}.jpg"
-    try:
-        await bot.download(fid, destination=tmp_path)
-    except Exception as e:
-        logger.warning(f"Failed to download photo for verification: {e}")
-    else:
-        if not _faces_found(tmp_path):
-            import os
-            try:
-                os.remove(tmp_path)
-            except:
-                pass
-            await message.answer(
-                "\U0001f914 <b>No face detected.</b>\n\n"
-                "Please send a <b>clear photo of yourself</b> with your face clearly visible.",
-                parse_mode='HTML'
-            )
-            return
-        import os
-        try:
-            os.remove(tmp_path)
-        except:
-            pass
+    if not await _verify_face(uid, fid):
+        await message.answer(
+            "\U0001f914 <b>No face detected.</b>\n\n"
+            "Please send a <b>clear photo of yourself</b> with your face clearly visible.",
+            parse_mode='HTML'
+        )
+        return
     user_profiles[uid]['photo'] = fid
     user_profiles[uid]['verified'] = True
     user_profiles[uid]['verification_status'] = 'verified'
