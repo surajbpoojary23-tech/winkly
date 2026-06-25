@@ -1654,9 +1654,6 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
     await mark_online(uid)
     preferred = cb.data.split(':', 1)[1]
     await state.update_data(preferred=preferred)
-    d = await state.get_data()
-    if d.get('prev_bot_msg'):
-        await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
     await state.set_state(Signup.location)
     await cb.message.edit_text(
         "<b>Step 4 of 7</b>\n\n"
@@ -1666,6 +1663,7 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⌨️  Enter Place Name", callback_data="loc_enter_text")],
         ])
     )
+    await state.update_data(prev_bot_msg=cb.message.message_id)
     await cb.answer()
 
 
