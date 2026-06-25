@@ -1203,9 +1203,8 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     ph = partner.get('photo')
     txt = (
         f"\U0001f389 <b>It's a Match!</b>\n\n"
-        f"We found you a match with <b>{n}</b>!\n\n"
-        f"\U0001f464 {n}{vb}\n"
-        f"\u2696\ufe0f {g}\n"
+        f"\U0001f464 <b>{n}{vb}</b>\n"
+        f"\u2696\ufe0f {g} | {n}\n"
         f"\U0001f4dd {b}\n\n"
         "Tap below to start chatting or skip:"
     )
@@ -1215,7 +1214,10 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     ])
     if ph:
         try:
-            await bot.send_photo(cid, ph, caption=txt, parse_mode='HTML', reply_markup=kb)
+            # Step 1: send photo as profile thumbnail (full-width square crop)
+            await bot.send_photo(cid, ph, caption=f"\U0001f464 <b>{n}</b>", parse_mode='HTML')
+            # Step 2: send match info card
+            await bot.send_message(cid, txt, parse_mode='HTML', reply_markup=kb)
             return
         except:
             pass
