@@ -186,6 +186,7 @@ current_chat: Dict[int, int] = {}
 _verify_pending: Dict[int, str] = {}
 _queue_msg_ids: Dict[int, int] = {}
 _processed_payments: Set[str] = set()
+_quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
 
 class Signup(StatesGroup):
     name = State()
@@ -1402,19 +1403,6 @@ async def say_hi(cb: types.CallbackQuery):
         await cb.answer("⚠️ Not in an active chat.", show_alert=True)
         return
     if not check_text_quota(uid):
-        # End the chat — no quota
-        partner = current_chat.pop(uid, None)
-        if partner:
-            current_chat.pop(partner, None)
-            await save_all()
-            try:
-                await bot.send_message(
-                    partner,
-                    f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} has used all their free texts.",
-                    parse_mode='HTML'
-                )
-            except:
-                pass
         p = user_profiles.get(uid, {})
         if p.get('gender') == 'Female' and not p.get('verified'):
             await cb.message.edit_text(
@@ -1503,22 +1491,6 @@ async def relay(message: types.Message, state: FSMContext):
         return
     pid = current_chat[uid]
     if not check_text_quota(uid):
-        # End the active chat — user can no longer send OR receive
-        partner = current_chat.pop(uid, None)
-        if partner:
-            current_chat.pop(partner, None)
-            await save_all()
-            try:
-                await bot.send_message(
-                    partner,
-                    f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} has used all their free texts. "
-                    "The chat has ended.\n\nFind a new match or upgrade for unlimited texts!",
-                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\U0001f4ac Find New Match", callback_data='do_match')],
-                    ])
-                )
-            except:
-                pass
         p = user_profiles[uid]
         if p.get('gender') == 'Female' and not p.get('verified'):
             await message.answer(
@@ -1540,6 +1512,30 @@ async def relay(message: types.Message, state: FSMContext):
         return
     # Receiver can always receive messages — no quota check
     try:
+        # If receiver has no quota, show notification instead of forwarding
+        if not check_text_quota(pid):
+            pname = user_profiles[uid].get('name', 'Someone')
+            n = _quota_notif.get(pid)
+            count = (n['count'] + 1) if n else 1
+            text = f"\U0001f4ec {pname} sent {count} message{'s' if count > 1 else ''}. Buy Premium to read and reply."
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
+            ])
+            if n:
+                try:
+                    await bot.edit_message_text(text, pid, n['mid'], parse_mode='HTML', reply_markup=kb)
+                except:
+                    # If edit fails (message deleted), send new one
+                    msg = await bot.send_message(pid, text, parse_mode='HTML', reply_markup=kb)
+                    _quota_notif[pid] = {'mid': msg.message_id, 'count': count}
+                else:
+                    _quota_notif[pid] = {'mid': n['mid'], 'count': count}
+            else:
+                msg = await bot.send_message(pid, text, parse_mode='HTML', reply_markup=kb)
+                _quota_notif[pid] = {'mid': msg.message_id, 'count': count}
+            consume_text(uid)
+            await save_all()
+            return
         await bot.copy_message(pid, message.chat.id, message.message_id)
         consume_text(uid)
         await save_all()
