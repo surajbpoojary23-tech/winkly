@@ -375,6 +375,12 @@ def make_link_sync(uid: int, name: str, price: int, days: int):
             "amount": price*100, "currency": "INR", "description": f"Winkly Premium - {name}",
             "notes": {"uid": str(uid), "duration_days": str(days)},
             "callback_url": f"{WEBHOOK_URL}/payment/success", "callback_method": "get",
+            "options": {
+                "checkout": {
+                    "name": "Winkly",
+                    "description": "Premium Dating"
+                }
+            },
         })
         return result.get("short_url")
     except Exception as e:
