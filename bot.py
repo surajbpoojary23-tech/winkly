@@ -298,7 +298,7 @@ async def get_online_count() -> int:
         return c
     except: return len(user_profiles)
 
-FREE_TEXTS_JOINING = 10000  # Effectively unlimited free texts
+FREE_TEXTS_JOINING = 20
 
 def is_premium(uid: int) -> bool:
     if uid not in premium_subscriptions: return False
