@@ -31,11 +31,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def _faces_found(image_path: str) -> bool:
-    """Return True if at least one face is detected in the image."""
+    """Return True if at least one face is detected in the image using OpenCV."""
     try:
-        img = face_recognition.load_image_file(image_path)
-        encodings = face_recognition.face_encodings(img, model='cnn')
-        return len(encodings) >= 1
+        import cv2
+        img = cv2.imread(image_path)
+        if img is None:
+            return True  # fail-open: accept on read error
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        return len(faces) >= 1
     except Exception as e:
         logger.warning(f"Face detection error: {e}")
         return True  # fail-open: accept on error
