@@ -483,6 +483,8 @@ def profile_text(p: dict) -> str:
             f"\nBio: {bio}\nLocation: {loc}\n{ph}{vb}")
 
 
+from PIL import Image
+import io
 
 # ─── /start ─────────────────────────────────────────────────────────────────
 
@@ -1296,12 +1298,26 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     ])
     if ph:
         try:
-            # Send small square thumbnail + text in one message
-            await bot.send_photo(cid, ph, caption=txt, parse_mode='HTML',
-                                reply_markup=kb)
+            tmp = f"/tmp/match_thumb_{cid}.jpg"
+            # Download, resize to small square thumbnail, save
+            img_bytes = await bot.download_file(await bot.get_file(ph.file_id))
+            img = Image.open(io.BytesIO(img_bytes))
+            short = min(img.size)
+            left = (img.width - short) // 2
+            top = (img.height - short) // 2
+            img = img.crop((left, top, left + short, top + short))
+            img = img.resize((150, 150), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, 'JPEG', quality=85)
+            buf.seek(0)
+            from aiogram.types import InputFile
+            await bot.send_photo(cid, InputFile(buf, filename='thumb.jpg'),
+                                 caption=txt, parse_mode='HTML',
+                                 reply_markup=kb)
+            os.remove(tmp)
             return
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Thumb error: {e}")
     await bot.send_message(cid, txt, parse_mode='HTML', reply_markup=kb)
 
 # ─── Chat ────────────────────────────────────────────────────────────────────
