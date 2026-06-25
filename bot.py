@@ -485,16 +485,14 @@ async def h_name(message: types.Message, state: FSMContext):
         return
     await state.update_data(name=name, username=message.from_user.username or '')
     await state.set_state(Signup.gender)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-            [KeyboardButton(text='\u2695\ufe0f Other')],
-        ], resize_keyboard=True, one_time_keyboard=True
-    )
     msg = await message.answer(
         "<b>Step 2 of 4</b>\n\n"
         "\u2696\ufe0f <b>What's your gender?</b>",
-        parse_mode='HTML', reply_markup=kb
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
+            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+        ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -508,26 +506,22 @@ async def h_gender(message: types.Message, state: FSMContext):
     keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
     GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Female', 'other': 'Other'}
     if keyword not in GENDER_KW:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-                [KeyboardButton(text='\u2695\ufe0f Other')],
-            ], resize_keyboard=True, one_time_keyboard=True
-        )
-        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=kb)
+        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
+            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+        ]))
         return
     await state.update_data(gender=GENDER_KW[keyword])
     await state.set_state(Signup.preferred)
-    kb2 = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
-            [KeyboardButton(text='\U0001f465 Everyone')],
-        ], resize_keyboard=True, one_time_keyboard=True
-    )
     msg = await message.answer(
         "<b>Step 3 of 4</b>\n\n"
         "\U0001f49d <b>Who are you interested in?</b>",
-        parse_mode='HTML', reply_markup=kb2
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="pref:Everyone")],
+        ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -542,29 +536,24 @@ async def h_preferred(message: types.Message, state: FSMContext):
     PREF_KW = {'male': 'Male', 'female': 'Female', 'everyone': 'Everyone',
                 'men': 'Male', 'women': 'Female'}
     if keyword not in PREF_KW:
-        kb2 = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
-                [KeyboardButton(text='\U0001f465 Everyone')],
-            ], resize_keyboard=True, one_time_keyboard=True
-        )
-        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=kb2)
+        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="pref:Everyone")],
+        ]))
         return
     await state.update_data(preferred=PREF_KW[keyword])
     d = await state.get_data()
     if d.get('prev_bot_msg'):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
     await state.set_state(Signup.location)
-    kb3 = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
-            [KeyboardButton(text='\u2328\ufe0f  Enter Place Name')],
-        ], resize_keyboard=True, one_time_keyboard=True
-    )
     msg = await message.answer(
         "<b>Step 4 of 4</b>\n\n"
         "\U0001f4cd <b>Share your location</b> or type a place name:",
-        parse_mode='HTML', reply_markup=kb3
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
+            [InlineKeyboardButton(text="⌨️  Enter Place Name", callback_data="loc_enter_text")],
+        ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -592,10 +581,9 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "📸 <b>Add a photo</b> (optional) — send one now or tap Skip:",
         parse_mode='HTML',
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text='⏭ Skip')]],
-            resize_keyboard=True, one_time_keyboard=True
-        )
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_photo")],
+        ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -634,10 +622,9 @@ async def h_loc_text(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "📸 <b>Add a photo</b> (optional) — send one now or tap Skip:",
         parse_mode='HTML',
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text='⏭ Skip')]],
-            resize_keyboard=True, one_time_keyboard=True
-        )
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_photo")],
+        ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -658,10 +645,9 @@ async def h_photo(message: types.Message, state: FSMContext):
         msg = await message.answer(
             "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
             parse_mode='HTML',
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text='⏭ Skip')]],
-                resize_keyboard=True, one_time_keyboard=True
-            )
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_bio")],
+            ])
         )
         await state.update_data(prev_bot_msg=msg.message_id)
         return
@@ -676,10 +662,9 @@ async def h_photo(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
         parse_mode='HTML',
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text='⏭ Skip')]],
-            resize_keyboard=True, one_time_keyboard=True
-        )
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_bio")],
+        ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -1482,22 +1467,15 @@ async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("⚠️ Finish signup first!", show_alert=True)
         return
     await state.set_state(EditProfile.gender)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text='👨\u200d👩 Male'), KeyboardButton(text='👩 Female')],
-            [KeyboardButton(text='⚕ Other')],
-        ], resize_keyboard=True, one_time_keyboard=True
-    )
-    # edit_text only accepts InlineKeyboardMarkup; send ReplyKeyboardMarkup separately
     await cb.message.edit_text(
-        "\u270f\ufe0f <b>Edit Gender/Interested</b>",
+        "\u270f\ufe0f <b>Edit Gender/Interested</b>\n\n"
+        "⚖️ <b>What's your gender?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="edit_gender:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="edit_gender:Female")],
+            [InlineKeyboardButton(text="⚕ Other", callback_data="edit_gender:Other")],
             [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
         ])
-    )
-    await cb.message.answer(
-        "⚖️ <b>What's your gender?</b>",
-        parse_mode='HTML', reply_markup=kb
     )
     await cb.answer()
 
@@ -1510,22 +1488,14 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
         return
     await state.set_state(EditProfile.location)
     await state.update_data(is_editing=True)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text='\U0001f4cd Share My Location', request_location=True)],
-            [KeyboardButton(text='\u2328\ufe0f  Enter Place Name')],
-        ], resize_keyboard=True, one_time_keyboard=True
-    )
-    # edit_text only accepts InlineKeyboardMarkup; send ReplyKeyboardMarkup separately
     await cb.message.edit_text(
-        "\u270f\ufe0f <b>Edit Location</b>",
+        "\u270f\ufe0f <b>Edit Location</b>\n\n"
+        "📍 Please share your location or type a place name:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps_edit")],
+            [InlineKeyboardButton(text="⌨️  Enter Place Name", callback_data="loc_enter_text_edit")],
             [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
         ])
-    )
-    await cb.message.answer(
-        "📍 Please share your location using the button below, or type a city/area name.",
-        parse_mode='HTML', reply_markup=kb
     )
     await cb.answer()
 
@@ -1545,6 +1515,183 @@ async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
+# === Signup inline button callbacks ===
+
+@dp.callback_query(lambda cb: cb.data.startswith('signup_gender:'))
+async def cb_signup_gender(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    gender = cb.data.split(':', 1)[1]
+    await state.update_data(gender=gender)
+    await state.set_state(Signup.preferred)
+    await cb.message.edit_text(
+        "<b>Step 3 of 4</b>\n\n"
+        "\U0001f49d <b>Who are you interested in?</b>",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="pref:Everyone")],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('pref:'))
+async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    preferred = cb.data.split(':', 1)[1]
+    await state.update_data(preferred=preferred)
+    d = await state.get_data()
+    if d.get('prev_bot_msg'):
+        await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
+    await state.set_state(Signup.location)
+    await cb.message.edit_text(
+        "<b>Step 4 of 4</b>\n\n"
+        "\U0001f4cd <b>Share your location</b> or type a place name:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
+            [InlineKeyboardButton(text="⌨️  Enter Place Name", callback_data="loc_enter_text")],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'loc_share_gps')
+async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    await state.set_state(Signup.location)
+    await cb.message.edit_text(
+        "\U0001f4cd <b>Share your location</b> - tap the paper clip icon -> Location button:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⌨️  Enter Place Name Instead", callback_data="loc_enter_text")],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'loc_enter_text')
+async def cb_loc_enter_text(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    await state.set_state(Signup.location)
+    await cb.message.edit_text(
+        "\U0001f4cd <b>Type a city or area name</b> (e.g. HSR Layout, Bangalore):",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'signup_skip_photo')
+async def cb_skip_photo(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    await state.set_state(Signup.bio)
+    await cb.message.edit_text(
+        "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_bio")],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'signup_skip_bio')
+async def cb_skip_bio(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    d = await state.get_data()
+    if d.get('prev_bot_msg'):
+        await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
+    await state.update_data(bio='')
+    await finish_signup(state, cb.message.chat.id, uid)
+    await state.clear()
+    await cb.answer()
+
+
+# === Edit profile inline button callbacks ===
+
+@dp.callback_query(lambda cb: cb.data.startswith('edit_gender:'))
+async def cb_edit_gender(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
+    gender = cb.data.split(':', 1)[1]
+    await state.update_data(gender=gender)
+    await state.set_state(EditProfile.preferred)
+    await cb.message.edit_text(
+        "\U0001f49d <b>Who are you interested in?</b>",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('edit_pref:'))
+async def cb_edit_pref(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
+    preferred = cb.data.split(':', 1)[1]
+    d = await state.get_data()
+    user_profiles[uid]['gender'] = d.get('gender', user_profiles[uid].get('gender'))
+    user_profiles[uid]['preferred_gender'] = preferred
+    await save_all()
+    await state.clear()
+    await cb.message.edit_text(
+        "\u2705 Gender preferences updated!",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'loc_share_gps_edit')
+async def cb_loc_share_gps_edit(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
+    await state.set_state(EditProfile.location)
+    await cb.message.edit_text(
+        "\U0001f4cd <b>Share your location</b> - tap the paper clip icon -> Location button:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⌨️  Enter Place Name Instead", callback_data="loc_enter_text_edit")],
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'loc_enter_text_edit')
+async def cb_loc_enter_text_edit(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
+    await state.set_state(EditProfile.location)
+    await cb.message.edit_text(
+        "\U0001f4cd <b>Type a city or area name</b> (e.g. HSR Layout, Bangalore):",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps_edit")],
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.answer()
 # EditProfile handlers
 @dp.message(StateFilter(EditProfile.name))
 async def edit_name_h(message: types.Message, state: FSMContext):
@@ -1585,23 +1732,19 @@ async def edit_gender_h(message: types.Message, state: FSMContext):
     keyword = ' '.join(re.findall(r'[a-z]+', ''.join(c for c in nfd if unicodedata.category(c) != 'Mn' and ord(c) != 0x200d)))
     GENDER_KW = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'women': 'Female', 'f': 'Female', 'other': 'Other'}
     if keyword not in GENDER_KW:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text='\U0001f468\u200d\U0001f3fb Male'), KeyboardButton(text='\U0001f469\u200d\U0001f3fb Female')],
-                [KeyboardButton(text='\u2695\ufe0f Other')],
-            ], resize_keyboard=True, one_time_keyboard=True
-        )
-        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=kb)
+        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="edit_gender:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="edit_gender:Female")],
+            [InlineKeyboardButton(text="⚕ Other", callback_data="edit_gender:Other")],
+        ]))
         return
     await state.update_data(gender=GENDER_KW[keyword])
     await state.set_state(EditProfile.preferred)
-    kb2 = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
-            [KeyboardButton(text='\U0001f465 Everyone')],
-        ], resize_keyboard=True, one_time_keyboard=True
-    )
-    await message.answer("\U0001f49d <b>Who are you interested in?</b>", parse_mode='HTML', reply_markup=kb2)
+    await message.answer("\U0001f49d <b>Who are you interested in?</b>", parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
+        [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
+        [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
+    ]))
 
 
 @dp.message(StateFilter(EditProfile.preferred))
@@ -1614,13 +1757,11 @@ async def edit_preferred_h(message: types.Message, state: FSMContext):
     PREF_KW = {'male': 'Male', 'female': 'Female', 'everyone': 'Everyone',
                 'men': 'Male', 'women': 'Female'}
     if keyword not in PREF_KW:
-        kb2 = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
-                [KeyboardButton(text='\U0001f465 Everyone')],
-            ], resize_keyboard=True, one_time_keyboard=True
-        )
-        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=kb2)
+        await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
+        ]))
         return
     d = await state.get_data()
     user_profiles[uid]['gender'] = d.get('gender', user_profiles[uid].get('gender'))
