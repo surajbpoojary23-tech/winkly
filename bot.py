@@ -701,10 +701,10 @@ async def h_photo(message: types.Message, state: FSMContext):
     if message.text and 'skip' in message.text.lower():
         await state.set_state(Signup.bio)
         msg = await message.answer(
-            "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+            "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
             parse_mode='HTML',
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏭ Skip", callback_data="signup_skip_bio")],
+                [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
             ])
         )
         await state.update_data(prev_bot_msg=msg.message_id)
@@ -715,32 +715,19 @@ async def h_photo(message: types.Message, state: FSMContext):
         return
 
     fid = message.photo[-1].file_id
-    face_ok = await _verify_face(uid, fid)
-
-    update = {'photo': fid}
-    if face_ok:
-        update['verified'] = True
-        update['verification_status'] = 'verified'
-    await state.update_data(**update)
+    await state.update_data(photo=fid)
 
     await state.set_state(Signup.bio)
-    prefix = ""
-    gender = d.get('gender', '')
-    if face_ok:
-        if gender == 'Female':
-            prefix = "\u2705 <b>Verified!</b> You have unlimited free access.\n\n"
-        else:
-            prefix = "\u2705 <b>Verified!</b> Your match card will show a verified badge.\u2714\ufe0f\n\n"
-    else:
-        prefix = "\U0001f4f7 Photo saved.\n\n"
     msg = await message.answer(
-        f"{prefix}\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+        "📸 Photo saved.\n\n"
+        "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
+
 
 
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
