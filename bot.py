@@ -1214,13 +1214,10 @@ async def end_chat(cb: types.CallbackQuery):
 
 # ─── Relay messages ───────────────────────────────────────────────────────────
 
-@dp.message()
+@dp.message(StateFilter(None))
 async def relay(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
-    st = await state.get_state()
-    if st is not None:
-        return
     if uid not in user_profiles:
         return
     if uid in _verify_pending:
