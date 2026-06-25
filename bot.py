@@ -437,14 +437,12 @@ def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="FIND MATCHES", callback_data='do_match')],
         [InlineKeyboardButton(text="EDIT PROFILE", callback_data='edit_profile')],
-        [InlineKeyboardButton(text="PREMIUM", callback_data='see_premium')],
     ])
 
 def reengage_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="FIND NEW MATCH", callback_data='do_match'),
          InlineKeyboardButton(text="MY PROFILE", callback_data='back_to_profile')],
-        [InlineKeyboardButton(text="PREMIUM", callback_data='see_premium')],
     ])
 
 def edit_profile_kb():
