@@ -159,10 +159,10 @@ class EditProfile(StatesGroup):
     location = State()
     photo = State()
 
-GENDER_NORM = {'male':'Men','female':'Women','other':'Other','men':'Men','women':'Women','m':'Men','f':'Women',
-               '\U0001f468\u200d\U0001f3fb':'Men','\U0001f469\u200d\U0001f3fb':'Women','\u2695\ufe0f':'Other',
-               '\U0001f468 Men':'Men','\U0001f469 Women':'Women','\U0001f465 Everyone':'Everyone',
-               '\U0001f468\u200d\U0001f3eb':'Men','\U0001f469\u200d\U0001f3fb':'Women','\U0001f465':'Everyone'}
+GENDER_NORM = {'male':'Male','female':'Female','other':'Other','men':'Male','women':'Female','m':'Male','f':'Female',
+                '\U0001f468\u200d\U0001f3fb':'Male','\U0001f469\u200d\U0001f3fb':'Female','\u2695\ufe0f':'Other',
+                '\U0001f468 Men':'Male','\U0001f469 Women':'Female','\U0001f465 Everyone':'Everyone',
+                '\U0001f468\u200d\U0001f3eb':'Male','\U0001f469\u200d\U0001f3fb':'Female','\U0001f465':'Everyone'}
 
 def norm_gender(g: str) -> str:
     return GENDER_NORM.get(g.lower().strip(), g)
@@ -346,7 +346,7 @@ def find_compat(me: dict, all_profiles: Dict[int, dict]):
     if not my_lat or not my_lon: return []
     my_pref = norm_gender(me.get('preferred_gender', ''))
     my_g = norm_gender(me.get('gender', ''))
-    pool = {'Men','Women','Other'} if my_pref == 'Everyone' else {norm_gender(my_pref)}
+    pool = {'Male','Female','Other'} if my_pref == 'Everyone' else {norm_gender(my_pref)}
     rejected = set(me.get('rejected', []))
     my_uid = me.get('_uid')
     results = []
@@ -514,7 +514,7 @@ async def h_gender(message: types.Message, state: FSMContext):
     await state.set_state(Signup.preferred)
     kb2 = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text='\U0001f468 Men'), KeyboardButton(text='\U0001f469 Women')],
+            [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
             [KeyboardButton(text='\U0001f465 Everyone')],
         ], resize_keyboard=True, one_time_keyboard=True
     )
@@ -1267,7 +1267,7 @@ async def relay(message: types.Message, state: FSMContext):
     pid = current_chat[uid]
     if not check_text_quota(uid):
         p = user_profiles[uid]
-        if p.get('gender') in ('Women', 'Female') and not p.get('verified'):
+            if p.get('gender') in ('Male', 'Female') and not p.get('verified'):
             await message.answer(
                 "⚠️ <b>You've used all your free texts.</b>\n\n"
                 "📸 Verify your profile for free unlimited access.",
@@ -1583,7 +1583,7 @@ async def edit_gender_h(message: types.Message, state: FSMContext):
     await state.set_state(EditProfile.preferred)
     kb2 = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text='\U0001f468 Men'), KeyboardButton(text='\U0001f469 Women')],
+            [KeyboardButton(text='\U0001f468 Male'), KeyboardButton(text='\U0001f469 Female')],
             [KeyboardButton(text='\U0001f465 Everyone')],
         ], resize_keyboard=True, one_time_keyboard=True
     )
