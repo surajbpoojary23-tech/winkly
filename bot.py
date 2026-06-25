@@ -22,7 +22,7 @@ import redis.asyncio as redis
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from aiogram.filters.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -149,6 +149,7 @@ class Signup(StatesGroup):
     preferred = State()
     location = State()
     photo = State()
+    bio = State()
 
 class EditProfile(StatesGroup):
     name = State()
@@ -450,7 +451,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             pass
         p = user_profiles[uid]
         await message.answer(
-            f"\u1f44b Hey again, <b>{p['name']}</b>!\n\n{quota_summary(uid)}\n\nWhat would you like to do?",
+            profile_text(p) + f"\n\n{quota_summary(uid)}",
             parse_mode='HTML', reply_markup=main_kb()
         )
         return
@@ -646,7 +647,16 @@ async def h_photo(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
 
     if message.text and 'skip' in message.text.lower():
-        await finish_signup(state, message.chat.id, uid)
+        await state.set_state(Signup.bio)
+        msg = await message.answer(
+            "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+            parse_mode='HTML',
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text='⏭ Skip')]],
+                resize_keyboard=True, one_time_keyboard=True
+            )
+        )
+        await state.update_data(prev_bot_msg=msg.message_id)
         return
 
     if not message.photo:
@@ -655,7 +665,16 @@ async def h_photo(message: types.Message, state: FSMContext):
 
     photo_id = message.photo[-1].file_id
     await state.update_data(photo=photo_id)
-    await finish_signup(state, message.chat.id, uid)
+    await state.set_state(Signup.bio)
+    msg = await message.answer(
+        "📝 <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text='⏭ Skip')]],
+            resize_keyboard=True, one_time_keyboard=True
+        )
+    )
+    await state.update_data(prev_bot_msg=msg.message_id)
 
 
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
@@ -691,6 +710,25 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof),
         parse_mode='HTML', reply_markup=main_kb()
     )
+
+@dp.message(StateFilter(Signup.bio))
+async def h_bio(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    await mark_online(uid)
+    d = await state.get_data()
+    if d.get('prev_bot_msg'):
+        await safe_delete(message.chat.id, d['prev_bot_msg'])
+
+    if message.text and 'skip' in message.text.lower():
+        await finish_signup(state, message.chat.id, uid)
+        return
+
+    bio = (message.text or '').strip()
+    if bio:
+        if len(bio) > 300:
+            bio = bio[:300]
+        await state.update_data(bio=bio)
+    await finish_signup(state, message.chat.id, uid)
 
 @dp.message(lambda m: m.photo and m.from_user.id in user_profiles, StateFilter(None))
 async def h_profile_photo(message: types.Message, state: FSMContext):
@@ -1803,20 +1841,11 @@ async def auto_setup_webhook():
 
 async def on_startup(dispatcher: Dispatcher):
     logger.info("Starting Winkly Bot v2...")
-    commands = [
-        BotCommand(command="start",   description="\U0001f3e0 Start / Restart"),
-        BotCommand(command="stop",    description="\U0001f51a End current chat"),
-        BotCommand(command="profile", description="\U0001f464 View my profile"),
-        BotCommand(command="find",    description="\u2764\ufe0f Find matches"),
-        BotCommand(command="verify",  description="\U0001f3c5 Get verified badge"),
-        BotCommand(command="premium", description="\U0001f3c6 Premium plans"),
-        BotCommand(command="refer",   description="\U0001f389 Refer friends"),
-    ]
     try:
-        await bot.set_my_commands(commands)
-        logger.info("Bot commands registered")
+        await bot.delete_my_commands()
+        logger.info("Menu button removed")
     except Exception as e:
-        logger.warning(f"Failed to set commands: {e}")
+        logger.warning(f"Failed to remove commands: {e}")
 
     await init_storage()
     logger.info(f"Loaded {len(user_profiles)} profiles, {len(active_matches)} matches")
