@@ -604,6 +604,9 @@ async def h_loc_text(message: types.Message, state: FSMContext):
     text = (message.text or '').strip()
     if not text:
         return
+    # Keyboard button placeholder — silently ignore
+    if text in ('\U0001f4cd Share My Location', '\u2328\ufe0f  Enter Place Name', '\U0001f4cd Share Location', 'Enter Place Name'):
+        return
     lat, lon = await geocode(text)
     if not lat:
         await message.answer("📍 Couldn't find that place. Try a city name or use <b>Share My Location</b>.", parse_mode='HTML')
@@ -1433,8 +1436,14 @@ async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
             [KeyboardButton(text='⚕ Other')],
         ], resize_keyboard=True, one_time_keyboard=True
     )
+    # edit_text only accepts InlineKeyboardMarkup; send ReplyKeyboardMarkup separately
     await cb.message.edit_text(
-        "\u270f\ufe0f <b>Edit Gender/Interested</b>\n\n"
+        "\u270f\ufe0f <b>Edit Gender/Interested</b>",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.message.answer(
         "⚖️ <b>What's your gender?</b>",
         parse_mode='HTML', reply_markup=kb
     )
@@ -1455,8 +1464,15 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
             [KeyboardButton(text='\u2328\ufe0f  Enter Place Name')],
         ], resize_keyboard=True, one_time_keyboard=True
     )
+    # edit_text only accepts InlineKeyboardMarkup; send ReplyKeyboardMarkup separately
     await cb.message.edit_text(
-        "\u270f\ufe0f <b>Edit Location</b>\n\nShare your new location:",
+        "\u270f\ufe0f <b>Edit Location</b>",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.message.answer(
+        "📍 Please share your location using the button below, or type a city/area name.",
         parse_mode='HTML', reply_markup=kb
     )
     await cb.answer()
@@ -1574,6 +1590,9 @@ async def edit_location_h(message: types.Message, state: FSMContext):
     else:
         text = (message.text or '').strip()
         if not text:
+            return
+        # Keyboard button placeholder — silently ignore, user should type a real place
+        if text in ('\U0001f4cd Share My Location', '\u2328\ufe0f  Enter Place Name', '\U0001f4cd Share Location', 'Enter Place Name'):
             return
         lat, lon = await geocode(text)
         if not lat:
