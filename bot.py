@@ -350,7 +350,7 @@ def find_compat(me: dict, all_profiles: Dict[int, dict]):
     my_uid = me.get('_uid')
     results = []
     for uid, other in all_profiles.items():
-        if uid == my_uid or not other.get('lat'): continue
+        if uid == my_uid or not other.get('lat') or not other.get('lon'): continue
         if uid in rejected: continue
         og = norm_gender(other.get('gender', '')); op = norm_gender(other.get('preferred_gender', ''))
         if og not in pool: continue
@@ -414,7 +414,18 @@ def edit_profile_kb():
 def profile_text(p: dict) -> str:
     vb = " VERIFIED" if p.get('verified') else ""
     ph = "HAS PHOTO" if p.get('photo') else "NO PHOTO"
-    loc = p.get('location_name', f"{float(p['lat']):.4f}, {float(p['lon']):.4f}" if p.get('lat') else 'NO LOCATION')
+    loc_name = p.get('location_name')
+    lat = p.get('lat')
+    if loc_name:
+        loc = loc_name
+    elif lat and lat != '':
+        try:
+            lon = p.get('lon', '')
+            loc = f"{float(lat):.4f}, {float(lon):.4f}"
+        except (ValueError, TypeError):
+            loc = 'NO LOCATION'
+    else:
+        loc = 'NO LOCATION'
     bio = p.get('bio') or 'NONE'
     return (f"YOUR PROFILE:\nName: {p.get('name','?')}\nGender: {p.get('gender','?')} | Interested: {p.get('preferred_gender','?')}"
             f"\nBio: {bio}\nLocation: {loc}\n{ph}{vb}")
@@ -674,7 +685,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     await state.clear()
     await bot.send_message(
         chat_id,
-        "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof) +
+        "🎉 <b>Profile complete!</b>\n\n" + profile_text(prof) +
         f"\n\n<blockquote>You have {FREE_TEXTS_JOINING} free texts to use with any matches. "
         "Premium unlocks unlimited!</blockquote>",
         parse_mode='HTML', reply_markup=main_kb()
