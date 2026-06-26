@@ -1292,7 +1292,7 @@ async def start_chat(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("⚠️ No free texts remaining. Upgrade to continue.", show_alert=True)
         return
     # Clear any stale FSM state (e.g. from an unfinished edit-profile flow)
-    # so that the relay handler (StateFilter(None)) catches chat messages.
+    # so inline keyboard handlers don't intercept chat messages.
     await state.clear()
     # Set current_chat AFTER quota check passes
     current_chat[uid] = pid
@@ -1437,7 +1437,7 @@ async def wait_in_chat(cb: types.CallbackQuery):
 
 # ─── Relay messages ───────────────────────────────────────────────────────────
 
-@dp.message(StateFilter(None))
+@dp.message(lambda msg: msg.from_user.id in current_chat)
 async def relay(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
