@@ -1436,7 +1436,8 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = f"\U0001f4ec {pname} sent {count} message{'s' if count > 1 else ''}. Buy Premium to read and reply."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
+                [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
             if n:
                 try:
