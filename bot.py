@@ -1341,12 +1341,10 @@ async def say_hi(cb: types.CallbackQuery):
             )
         else:
             await cb.message.edit_text(
-                base,
+                "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="\U0001f3c6 1 Day \u2014 Rs49", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
-                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data=f'wait_in_chat:{pid}'),
-                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
                 ])
             )
         await cb.answer()
@@ -1458,12 +1456,10 @@ async def relay(message: types.Message, state: FSMContext):
             )
         else:
             await message.answer(
-                base,
+                "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="\U0001f3c6 1 Day \u2014 Rs49", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
-                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data='wait_hold'),
-                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
                 ])
             )
         return
