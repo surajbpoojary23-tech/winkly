@@ -205,7 +205,6 @@ class EditProfile(StatesGroup):
     gender = State()
     preferred = State()
     location = State()
-    photo = State()
     dob = State()
 
 GENDER_NORM = {'male':'Male','female':'Female','other':'Other','men':'Male','women':'Female','m':'Male','f':'Female',
@@ -462,13 +461,11 @@ def edit_profile_kb():
          InlineKeyboardButton(text="EDIT BIO", callback_data='edit_bio')],
         [InlineKeyboardButton(text="EDIT PREFERRED", callback_data='edit_preferred')],
         [InlineKeyboardButton(text="EDIT LOCATION", callback_data='edit_location')],
-        [InlineKeyboardButton(text="CHANGE PHOTO", callback_data='edit_photo')],
         [InlineKeyboardButton(text="BACK", callback_data='back_to_profile')],
     ])
 
 def profile_text(p: dict) -> str:
     vb = " VERIFIED" if p.get('verified') else ""
-    ph = "HAS PHOTO" if p.get('photo') else "NO PHOTO"
     loc_name = p.get('location_name')
     lat = p.get('lat')
     if loc_name:
@@ -489,11 +486,10 @@ def profile_text(p: dict) -> str:
         if dob:
             age_str = f" | Age: {calc_age(dob)}"
     return (f"YOUR PROFILE:\nName: {p.get('name','?')}\nGender: {p.get('gender','?')} | Interested: {p.get('preferred_gender','?')}{age_str}"
-            f"\nBio: {bio}\nLocation: {loc}\n{ph}{vb}")
+            f"\nBio: {bio}\nLocation: {loc}{vb}")
 
 
-from PIL import Image
-import io
+
 
 # ─── /start ─────────────────────────────────────────────────────────────────
 
@@ -818,33 +814,7 @@ async def h_dob(message: types.Message, state: FSMContext):
     await state.update_data(prev_bot_msg=msg.message_id)
 
 
-@dp.message(lambda m: m.photo and m.from_user.id in user_profiles, StateFilter(None))
-async def h_profile_photo(message: types.Message, state: FSMContext):
-    uid = message.from_user.id
-    await mark_online(uid)
-    if uid in current_chat:
-        return  # Let relay() forward the photo to the chat partner
-    if uid in _verify_pending:
-        await h_verify_photo(message)
-        return
-    fid = message.photo[-1].file_id
-    user_profiles[uid]['photo'] = fid
-    # Run face detection for auto-verification
-    if await _verify_face(uid, fid):
-        user_profiles[uid]['verified'] = True
-        user_profiles[uid]['verification_status'] = 'verified'
-        await save_all()
-        await message.answer(
-            "\u2705 <b>Profile photo updated & verified!</b>\n\n"
-            "A face was detected — you're now verified!",
-            parse_mode='HTML', reply_markup=main_kb(uid)
-        )
-    else:
-        await save_all()
-        await message.answer(
-            "\u2705 Profile photo updated!",
-            parse_mode='HTML', reply_markup=main_kb(uid)
-        )
+
 
 # ─── /profile ────────────────────────────────────────────────────────────────
 
@@ -1095,7 +1065,8 @@ async def h_verify_photo(message: types.Message, state: FSMContext):
     if not await _verify_face(uid, fid):
         await message.answer(
             "\U0001f914 <b>No face detected.</b>\n\n"
-            "Please take a <b>clear selfie</b> with your face clearly visible.",
+            "Please take a <b>clear selfie with your FRONT CAMERA</b> — "
+            "face must be clearly visible.",
             parse_mode='HTML',
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="📸 Try Again", request_photo=True)]],
@@ -1103,7 +1074,7 @@ async def h_verify_photo(message: types.Message, state: FSMContext):
             )
         )
         return
-    user_profiles[uid]['photo'] = fid
+    user_profiles[uid]['selfie'] = fid
     user_profiles[uid]['verified'] = True
     user_profiles[uid]['verification_status'] = 'verified'
     await save_all()
@@ -1112,7 +1083,7 @@ async def h_verify_photo(message: types.Message, state: FSMContext):
     if gender == 'Female':
         await message.answer(
             "\u2705 <b>Verified!</b>\n\n"
-            "Your profile photo is set. You now have unlimited free access to chat.\n\n"
+            "Selfie verified. You now have unlimited free access to chat.\n\n"
             "Go find your match! \u2764\ufe0f",
             parse_mode='HTML',
             reply_markup=main_kb(uid)
@@ -1120,7 +1091,7 @@ async def h_verify_photo(message: types.Message, state: FSMContext):
     else:
         await message.answer(
             "\u2705 <b>Verified!</b>\n\n"
-            "Your profile photo is set. Your match card will now show a verified badge \u2714\ufe0f.",
+            "Selfie verified. Your profile now shows a verified badge \u2714\ufe0f.",
             parse_mode='HTML',
             reply_markup=main_kb(uid)
         )
@@ -1277,7 +1248,6 @@ async def do_match(cb: types.CallbackQuery):
 async def send_match_card(cid: int, partner: dict, pid: int):
     n = partner.get('name', '?')
     g = partner.get('gender', '?')
-    ph = partner.get('photo')
     txt = (
         f"\U0001f389 <b>You matched with</b> {n}\n"
         f"\u2696\ufe0f {g}"
@@ -1285,28 +1255,6 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="\U0001f4ac  Chat Now", callback_data=f'chat:{pid}')],
     ])
-    if ph:
-        try:
-            tmp = f"/tmp/match_thumb_{cid}.jpg"
-            # Download, resize to small square thumbnail, save
-            img_bytes = await bot.download_file(await bot.get_file(ph.file_id))
-            img = Image.open(io.BytesIO(img_bytes))
-            short = min(img.size)
-            left = (img.width - short) // 2
-            top = (img.height - short) // 2
-            img = img.crop((left, top, left + short, top + short))
-            img = img.resize((150, 150), Image.LANCZOS)
-            buf = io.BytesIO()
-            img.save(buf, 'JPEG', quality=85)
-            buf.seek(0)
-            from aiogram.types import InputFile
-            await bot.send_photo(cid, InputFile(buf, filename='thumb.jpg'),
-                                 caption=txt, parse_mode='HTML',
-                                 reply_markup=kb)
-            os.remove(tmp)
-            return
-        except Exception as e:
-            logger.error(f"Thumb error: {e}")
     await bot.send_message(cid, txt, parse_mode='HTML', reply_markup=kb)
 
 # ─── Chat ────────────────────────────────────────────────────────────────────
@@ -1742,23 +1690,6 @@ async def edit_l(cb: types.CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
-@dp.callback_query(lambda cb: cb.data == 'edit_photo')
-async def edit_ph(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    if await _guard_edit(state):
-        await cb.answer("⚠️ Finish signup first!", show_alert=True)
-        return
-    await state.set_state(EditProfile.photo)
-    await cb.message.edit_text(
-        "\u270f\ufe0f <b>Change Photo</b>\n\nSend a new profile photo:",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
-        ])
-    )
-    await cb.answer()
-
-
 # === DOB year picker callbacks ===
 @dp.callback_query(lambda cb: cb.data.startswith('signup_dob:'))
 async def cb_signup_dob(cb: types.CallbackQuery, state: FSMContext):
@@ -2036,19 +1967,6 @@ async def edit_location_h(message: types.Message, state: FSMContext):
     ]))
 
 
-@dp.message(StateFilter(EditProfile.photo))
-async def edit_photo_h(message: types.Message, state: FSMContext):
-    uid = message.from_user.id
-    await mark_online(uid)
-    if not message.photo:
-        await message.answer("📸 Send a photo.")
-        return
-    user_profiles[uid]['photo'] = message.photo[-1].file_id
-    await save_all()
-    await state.clear()
-    await message.answer("✅ Photo updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
-    ]))
 
 
 # h_edit_dob removed
