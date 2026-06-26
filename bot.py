@@ -401,9 +401,10 @@ def find_compat(me: dict, all_profiles: Dict[int, dict]):
         results.append({**other, 'uid': uid, 'distance_km': round(d, 1)})
     results.sort(key=lambda m: m['distance_km']); return results
 
-def find_queue_match(me: dict):
-    me2 = {**me, '_uid': me.get('_uid')}
+def find_queue_match(me: dict, my_uid: int):
+    me2 = {**me, '_uid': my_uid}
     for uid in list(waiting_queue.keys()):
+        if uid == my_uid: continue
         if uid not in user_profiles: continue
         m = find_compat(me2, {uid: user_profiles[uid]})
         if m: return {**m[0], 'wait_info': waiting_queue[uid]}
@@ -1204,7 +1205,7 @@ async def do_match(cb: types.CallbackQuery):
         await cb.answer()
         return
     me = user_profiles[uid]
-    m = find_queue_match(me)
+    m = find_queue_match(me, uid)
     if m:
         pid = m['uid']
         active_matches.setdefault(uid, {})
