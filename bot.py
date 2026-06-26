@@ -75,10 +75,11 @@ RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', 'MBAphgobB9XnZ33SylDA9r7C
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', 'winkly_webhook_secret')
 
 LONG_PLANS = [
-    {"name": "Monthly",   "price": 199, "duration": 30},
-    {"name": "3 Months", "price": 299, "duration": 90},
-    {"name": "6 Months", "price": 499, "duration": 180},
-    {"name": "1 Year",    "price": 699, "duration": 365},
+    {"name": "TEST 1 Day", "price": 1,  "duration": 1},
+    {"name": "Monthly",    "price": 199, "duration": 30},
+    {"name": "3 Months",   "price": 299, "duration": 90},
+    {"name": "6 Months",   "price": 499, "duration": 180},
+    {"name": "1 Year",      "price": 699, "duration": 365},
 ]
 
 bot = Bot(token=BOT_TOKEN)
@@ -345,8 +346,8 @@ def quota_summary(uid: int) -> str:
     p = user_profiles.get(uid, {})
     ft = p.get('free_texts', 0)
     if ft > 0:
-        return f"FREE - {ft} free texts left. Upgrade from Rs49/day for unlimited."
-    return "FREE LIMIT REACHED - Upgrade from Rs49/day for unlimited texts."
+        return f"FREE - {ft} free texts left. Upgrade for unlimited."
+    return "FREE LIMIT REACHED - Upgrade for unlimited texts."
 
 def referral_code(uid: int) -> str:
     return hashlib.md5(f"winkly_{uid}_ref".encode()).hexdigest()[:8].upper()
@@ -953,7 +954,7 @@ async def cmd_premium(message: types.Message):
     await message.answer(
         f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
+            [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
         ])
     )
@@ -1343,7 +1344,7 @@ async def say_hi(cb: types.CallbackQuery):
             await cb.message.edit_text(
                 "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 1 Day \u2014 Rs49", callback_data='premium_1day'),
+                    [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
@@ -1458,7 +1459,7 @@ async def relay(message: types.Message, state: FSMContext):
             await message.answer(
                 "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 1 Day \u2014 Rs49", callback_data='premium_1day'),
+                    [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
@@ -1472,7 +1473,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = f"\U0001f4ec {pname} sent {count} message{'s' if count > 1 else ''}. Buy Premium to read and reply."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -1507,7 +1508,7 @@ async def prem_1(cb: types.CallbackQuery):
         await cb.answer()
         return
     await cb.message.edit_text("\u23f3 Creating payment link...")
-    url = await make_payment_link(uid, "1 Day", 49, 1)
+    url = await make_payment_link(uid, "TEST 1 Day", 1, 1)
     if not url:
         await cb.message.edit_text(
             "⚠️ Couldn't create payment link. Please try again later.",
@@ -1518,11 +1519,11 @@ async def prem_1(cb: types.CallbackQuery):
         await cb.answer("Payment failed", show_alert=True)
         return
     await cb.message.edit_text(
-        "\U0001f3c6 <b>1 Day Premium — Rs49</b>\n\n"
-        "\u2705 Unlimited texts and matches for 24 hours\n\n"
+        "\U0001f3c6 <b>TEST 1 Day — Rs1</b>\n\n"
+        "\u2705 Unlimited texts and matches for 1 day\n\n"
         "Tap below to complete payment:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4b3 Pay Rs49", url=url)],
+            [InlineKeyboardButton(text="\U0001f4b3 Pay Rs1", url=url)],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
         ])
@@ -1537,7 +1538,7 @@ async def prem_plans(cb: types.CallbackQuery):
         text=f"\U0001f3c6 {p['name']} — Rs{p['price']} (Save {int((1 - p['price']/(49*p['duration']))*100)}%)",
         callback_data=f"premium_select:{p['name']}:{p['price']}:{p['duration']}"
     )] for p in LONG_PLANS]
-    rows.append([InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')])
+    rows.append([InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')])
     rows.append([InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='back_to_premium')])
     await cb.message.edit_text(
         "\U0001f3c6 <b>Premium Plans</b>\n\n" +
@@ -1586,7 +1587,7 @@ async def back_prem(cb: types.CallbackQuery):
         await cb.message.edit_text(
             f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
         )
