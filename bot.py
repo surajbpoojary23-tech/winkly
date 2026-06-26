@@ -1350,11 +1350,6 @@ async def start_chat(cb: types.CallbackQuery):
     current_chat[uid] = pid
     current_chat[pid] = uid
     await save_all()
-    try:
-        r = await bot.send_message(uid, ".", reply_markup=ReplyKeyboardRemove())
-        await safe_delete(uid, r.message_id)
-    except:
-        pass
     pname = user_profiles.get(pid, {}).get('name', 'Someone')
     # Delete old match card (may be a photo — edit_text fails on media messages)
     await safe_delete(uid, cb.message.message_id)
