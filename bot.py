@@ -1281,7 +1281,7 @@ async def skip_match(cb: types.CallbackQuery):
     await cb.answer()
 
 @dp.callback_query(lambda cb: cb.data.startswith('chat:'))
-async def start_chat(cb: types.CallbackQuery):
+async def start_chat(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     pid = int(cb.data.split(':')[1])
@@ -1291,6 +1291,9 @@ async def start_chat(cb: types.CallbackQuery):
     if not check_text_quota(uid):
         await cb.answer("⚠️ No free texts remaining. Upgrade to continue.", show_alert=True)
         return
+    # Clear any stale FSM state (e.g. from an unfinished edit-profile flow)
+    # so that the relay handler (StateFilter(None)) catches chat messages.
+    await state.clear()
     # Set current_chat AFTER quota check passes
     current_chat[uid] = pid
     current_chat[pid] = uid
