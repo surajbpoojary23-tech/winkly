@@ -506,11 +506,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if ref_code:
         await state.update_data(ref_code=ref_code)
     if uid in user_profiles:
-        try:
-            r = await message.answer(".", reply_markup=ReplyKeyboardRemove())
-            await safe_delete(message.chat.id, r.message_id)
-        except:
-            pass
         p = user_profiles[uid]
         await message.answer(
             profile_text(p),
@@ -829,9 +824,27 @@ async def h_profile_photo(message: types.Message, state: FSMContext):
     await mark_online(uid)
     if uid in current_chat:
         return  # Let relay() forward the photo to the chat partner
-    user_profiles[uid]['photo'] = message.photo[-1].file_id
-    await save_all()
-    await message.answer("\u2705 Profile photo updated!", reply_markup=main_kb(uid))
+    if uid in _verify_pending:
+        await h_verify_photo(message)
+        return
+    fid = message.photo[-1].file_id
+    user_profiles[uid]['photo'] = fid
+    # Run face detection for auto-verification
+    if await _verify_face(uid, fid):
+        user_profiles[uid]['verified'] = True
+        user_profiles[uid]['verification_status'] = 'verified'
+        await save_all()
+        await message.answer(
+            "\u2705 <b>Profile photo updated & verified!</b>\n\n"
+            "A face was detected — you're now verified!",
+            parse_mode='HTML', reply_markup=main_kb(uid)
+        )
+    else:
+        await save_all()
+        await message.answer(
+            "\u2705 Profile photo updated!",
+            parse_mode='HTML', reply_markup=main_kb(uid)
+        )
 
 # ─── /profile ────────────────────────────────────────────────────────────────
 
