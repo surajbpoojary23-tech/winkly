@@ -22,7 +22,7 @@ import redis.asyncio as redis
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, WebAppInfo
 from aiogram.filters.state import State, StatesGroup
 import cv2
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -183,7 +183,6 @@ likes_sent: Dict[int, Set[int]] = {}
 waiting_queue: Dict[int, dict] = {}
 premium_subscriptions: Dict[int, dict] = {}
 current_chat: Dict[int, int] = {}
-_verify_pending: Dict[int, str] = {}
 _queue_msg_ids: Dict[int, int] = {}
 _processed_payments: Set[str] = set()
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
@@ -1004,16 +1003,13 @@ async def verify_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.message.edit_text("\u2705 You're already verified!")
         await cb.answer()
         return
-    await state.set_state(Verify.photo)
     text = (
         "\U0001f4f7 <b>Selfie Verification</b>\n\n"
-        "Take a <b>clear selfie photo</b> with your <b>FRONT CAMERA</b>.\n\n"
-        "Your device camera will open automatically."
+        "Tap the button below — your <b>front camera</b> will open automatically."
     )
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
-        one_time_keyboard=True
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📸 Take Selfie", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/selfie?uid={uid}"))],
+    ])
     try:
         await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
     except:
@@ -1033,16 +1029,13 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
     p['verification_status'] = 'none'
     p.pop('selfie', None)
     await save_all()
-    await state.set_state(Verify.photo)
     text = (
         "\U0001f4f7 <b>Selfie Verification</b>\n\n"
-        "Take a <b>clear selfie photo</b> with your <b>FRONT CAMERA</b>.\n\n"
-        "Your device camera will open automatically."
+        "Tap the button below — your <b>front camera</b> will open automatically."
     )
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
-        one_time_keyboard=True
-    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📸 Take Selfie", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/selfie?uid={uid}"))],
+    ])
     try:
         await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
     except:
@@ -2147,6 +2140,88 @@ async def auto_setup_webhook():
         logger.info(f"Create manually: Razorpay Dashboard > Settings > Webhooks")
         logger.info(f"URL: {WEBHOOK_URL}/razorpay/webhook")
 
+
+SELFIE_PAGE = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;color:#fff;font-family:-apple-system,sans-serif}
+video{width:100%;max-width:400px;border-radius:12px;transform:scaleX(-1)}
+#capture{margin-top:20px;padding:16px 48px;font-size:20px;border:none;border-radius:40px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600}
+#capture:disabled{opacity:.5}
+#status{margin-top:12px;font-size:14px;text-align:center;color:#aaa}
+</style></head><body>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas" style="display:none"></canvas>
+<button id="capture">📸 Capture Selfie</button>
+<div id="status">Opening front camera...</div>
+<script>
+const p=new URLSearchParams(window.location.search),uid=p.get('uid');
+const v=document.getElementById('video'),c=document.getElementById('canvas'),btn=document.getElementById('capture'),st=document.getElementById('status');
+async function init(){try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:480,height:640}});v.srcObject=s;st.textContent='Look at the camera and tap Capture'}catch(e){st.textContent='Camera error: '+e.message;btn.disabled=1}}
+init();
+btn.onclick=async()=>{c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);btn.disabled=1;st.textContent='Uploading...';
+const b=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8)),fd=new FormData();fd.append('photo',b,'selfie.jpg');fd.append('uid',uid);
+try{const r=await fetch('/api/upload_selfie',{method:'POST',body:fd});const t=await r.text();
+if(t==='OK'){st.textContent='✅ Selfie uploaded! Check Telegram';setTimeout(()=>Telegram.WebApp.close(),1500)}
+else if(t==='NO_FACE'){st.textContent='❌ No face detected. Tap Capture to try again';btn.disabled=0}
+else{st.textContent='❌ Error: '+t;btn.disabled=0}
+}catch(e){st.textContent='Upload error: '+e.message;btn.disabled=0}};
+</script></body></html>"""
+
+
+async def handle_selfie_page(request):
+    uid = request.query.get('uid', '')
+    page = SELFIE_PAGE.replace('{uid}', uid)
+    return web.Response(text=page, content_type='text/html')
+
+
+async def handle_upload_selfie(request):
+    try:
+        data = await request.post()
+        uid_str = data.get('uid', '')
+        photo_field = data.get('photo')
+        if not uid_str or not photo_field:
+            return web.Response(text='MISSING_FIELDS', status=400)
+        uid = int(uid_str)
+        raw = photo_field.file.read()
+        tmp = f"/tmp/selfie_upload_{uid}.jpg"
+        with open(tmp, 'wb') as f:
+            f.write(raw)
+        ok = _faces_found(tmp)
+        try:
+            os.remove(tmp)
+        except:
+            pass
+        if ok:
+            if uid in user_profiles:
+                user_profiles[uid]['selfie'] = uid  # placeholder (we don't keep the file_id)
+                user_profiles[uid]['verified'] = True
+                user_profiles[uid]['verification_status'] = 'verified'
+                await save_all()
+                g = user_profiles[uid].get('gender', '')
+                if g == 'Female':
+                    await bot.send_message(uid,
+                        "\u2705 <b>Verified!</b>\n\nSelfie verified. You now have unlimited free access to chat.\n\nGo find your match! \u2764\ufe0f",
+                        parse_mode='HTML', reply_markup=main_kb(uid))
+                else:
+                    await bot.send_message(uid,
+                        "\u2705 <b>Verified!</b>\n\nSelfie verified. Your profile now shows a verified badge \u2714\ufe0f.",
+                        parse_mode='HTML', reply_markup=main_kb(uid))
+        else:
+            await bot.send_message(uid,
+                "\U0001f914 <b>No face detected.</b>\n\nPlease try again — make sure your face is clearly visible and front camera is used.",
+                parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📸 Try Again", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/selfie?uid={uid}"))],
+                ]))
+        return web.Response(text='OK' if ok else 'NO_FACE')
+    except Exception as e:
+        logger.error(f"Upload selfie error: {e}")
+        return web.Response(text='SERVER_ERROR', status=500)
+
+
 # ─── Startup ───────────────────────────────────────────────────────────────
 
 async def on_startup(dispatcher: Dispatcher):
@@ -2186,6 +2261,8 @@ async def on_startup(dispatcher: Dispatcher):
         app.router.add_post('/health', health)
         app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
         app.router.add_get('/payment/success', payment_success_page)
+        app.router.add_get('/selfie', handle_selfie_page)
+        app.router.add_post('/api/upload_selfie', handle_upload_selfie)
         handler.register(app, path='/')
 
         runner = web.AppRunner(app)
