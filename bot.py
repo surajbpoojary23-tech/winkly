@@ -1697,7 +1697,8 @@ async def cb_signup_dob(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(Signup.gender)
     await cb.message.edit_text(
         "<b>Step 3 of 6</b>\n\n"
-        "\u2696\ufe0f <b>What's your gender?</b>",
+        "\u2696\ufe0f <b>What's your gender?</b>\n"
+        "<i>This cannot be changed later.</i>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
             [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
