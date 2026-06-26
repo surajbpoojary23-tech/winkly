@@ -865,6 +865,10 @@ async def cmd_stop(message: types.Message):
             )
         except:
             pass
+    # Clean up active_matches so they can rematch
+    if partner:
+        active_matches.get(uid, {}).pop(partner, None)
+        active_matches.get(partner, {}).pop(uid, None)
     await message.answer("\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
                          parse_mode='HTML', reply_markup=reengage_kb(uid))
 
@@ -1286,6 +1290,7 @@ async def start_chat(cb: types.CallbackQuery):
     if not check_text_quota(uid):
         await cb.answer("⚠️ No free texts remaining. Upgrade to continue.", show_alert=True)
         return
+    # Set current_chat AFTER quota check passes
     current_chat[uid] = pid
     current_chat[pid] = uid
     await save_all()
@@ -1388,11 +1393,14 @@ async def end_chat(cb: types.CallbackQuery):
             )
         except:
             pass
+    # Clean up active_matches so they can rematch
+    active_matches.get(uid, {}).pop(partner, None)
+    active_matches.get(partner, {}).pop(uid, None)
+    await save_all()
     await cb.message.edit_text(
         "\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
         parse_mode='HTML', reply_markup=reengage_kb(uid)
     )
-    await save_all()
     await cb.answer()
 
 
@@ -1479,7 +1487,6 @@ async def relay(message: types.Message, state: FSMContext):
             else:
                 msg = await bot.send_message(pid, text, parse_mode='HTML', reply_markup=kb)
                 _quota_notif[pid] = {'mid': msg.message_id, 'count': count}
-            consume_text(uid)
             await save_all()
             return
         await bot.copy_message(pid, message.chat.id, message.message_id)
