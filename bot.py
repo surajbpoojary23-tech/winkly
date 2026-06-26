@@ -513,7 +513,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             pass
         p = user_profiles[uid]
         await message.answer(
-            profile_text(p) + f"\n\n{quota_summary(uid)}",
+            profile_text(p),
             parse_mode='HTML', reply_markup=main_kb(uid)
         )
         return
