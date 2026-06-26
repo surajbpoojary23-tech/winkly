@@ -1297,7 +1297,7 @@ async def start_chat(cb: types.CallbackQuery):
     pname = user_profiles.get(pid, {}).get('name', 'Someone')
     # Delete old match card (may be a photo — edit_text fails on media messages)
     await safe_delete(uid, cb.message.message_id)
-    # Send chat interface as a fresh message
+    # Send chat interface — user controls when to say hi
     await bot.send_message(
         uid,
         f"\U0001f4ac <b>Chat with {pname}</b>\n\n"
@@ -1308,11 +1308,15 @@ async def start_chat(cb: types.CallbackQuery):
             [InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_chat')],
         ])
     )
-    await bot.send_message(
-        pid,
-        f"<b>{user_profiles[uid]['name']}</b> said: Hi!",
-        parse_mode='HTML'
-    )
+    # Notify partner that someone started a chat — they will see your hi when you send it
+    try:
+        await bot.send_message(
+            pid,
+            f"\U0001f4ac <b>{user_profiles[uid]['name']}</b> started a chat with you!",
+            parse_mode='HTML'
+        )
+    except:
+        pass
     await cb.answer()
 
 @dp.callback_query(lambda cb: cb.data.startswith('say_hi:'))
