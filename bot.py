@@ -73,6 +73,7 @@ ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', '0'))
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', 'rzp_live_T5RFsK3b9AYBTX')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', 'MBAphgobB9XnZ33SylDA9r7C')
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', 'winkly_webhook_secret')
+BOT_USERNAME = os.getenv('BOT_USERNAME', 'Winkly_dating_bot')
 
 LONG_PLANS = [
     {"name": "TEST 1 Day", "price": 1,  "duration": 1},
@@ -987,7 +988,7 @@ async def share_bot(cb: types.CallbackQuery, state: FSMContext):
     code = referral_code(uid)
     await cb.message.edit_text(
         f"\U0001f4e4 <b>Share Winkly with friends!</b>\n\n"
-        f"Send them this link: t.me/winklybot?start={code}\n\n"
+        f"Send them this link: t.me/{BOT_USERNAME}?start={code}\n\n"
         f"Or share your code: <code>{code}</code>\n\n"
         f"3 signups = 1 free day! \U0001f389",
         parse_mode='HTML'
@@ -2116,15 +2117,17 @@ async def check_queue_loop():
 
 async def handle_razorpay_webhook(request):
     try:
+        logger.info(f"Razorpay webhook hit: {request.headers.get('X-Razorpay-Signature', 'NO_SIG')[:20]}...")
         if not RAZORPAY_WEBHOOK_SECRET:
             return web.Response(status=400, text="Webhook secret not configured")
         sig = request.headers.get('X-Razorpay-Signature')
         if not sig:
             return web.Response(status=400, text="Missing signature")
         body = await request.text()
+        logger.info(f"Webhook body preview: {body[:200]}")
         expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
         if sig != expected:
-            logger.warning(f"Webhook invalid sig: {sig[:20]}...")
+            logger.warning(f"Webhook invalid sig: {sig[:20]}... expected {expected[:20]}...")
             return web.Response(status=400, text="Invalid signature")
         data = json.loads(body)
         event = data.get('event', '')
@@ -2181,7 +2184,7 @@ async def handle_razorpay_webhook(request):
 async def payment_success_page(request):
     return web.Response(
         content_type='text/html',
-        text='<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}.card{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}.check{font-size:64px;margin-bottom:16px}.btn{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/winklybot">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
     )
 
 async def auto_setup_webhook():
