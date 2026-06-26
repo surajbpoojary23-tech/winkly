@@ -2187,36 +2187,46 @@ async def handle_razorpay_webhook(request):
 
 async def payment_success_page(request):
     logger.info(f"Payment success page hit: {dict(request.query)}")
-    payment_id = request.query.get('razorpay_payment_id') or request.query.get('payment_id') or request.query.get('id')
-    if payment_id and razorpay_client:
-        try:
-            p = razorpay_client.payment_link.fetch(payment_id)
-            notes = p.get('notes', {})
-            uid_s = notes.get('uid')
-            dur_s = notes.get('duration_days')
-            if uid_s and dur_s:
-                uid = int(uid_s)
-                dur = int(dur_s)
-                payment_link_id = request.query.get('razorpay_payment_link_id') or payment_id
-                if payment_link_id not in _processed_payments:
-                    exp = datetime.now() + timedelta(days=dur)
-                    premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
-                    _processed_payments.add(payment_link_id)
-                    await save_all()
-                    logger.info(f"Premium activated via success page for {uid}, plan={dur}d")
-                    try:
-                        await bot.send_message(uid,
-                            f"\U0001f389 <b>Payment Successful!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!",
-                            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                                [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
-                            ]))
-                    except:
-                        pass
-        except Exception as e:
-            logger.warning(f"Payment success page error: {e}")
+    # Fallback activation: check query params + local map first, then Razorpay API
+    plink_id = request.query.get('razorpay_payment_link_id')
+    payment_id = request.query.get('razorpay_payment_id')
+    status = request.query.get('razorpay_payment_link_status')
+    uid = dur = None
+    if plink_id and status == 'paid' and plink_id not in _processed_payments:
+        # Fast path: look up in our local map (no API call needed)
+        info = _payment_link_map.get(plink_id)
+        if info:
+            uid = info['uid']
+            dur = info['duration_days']
+        elif payment_id and razorpay_client:
+            # Slow path: fetch payment link details from Razorpay API
+            try:
+                p = razorpay_client.payment_link.fetch(plink_id)
+                notes = p.get('notes', {})
+                uid_s = notes.get('uid')
+                dur_s = notes.get('duration_days')
+                if uid_s and dur_s:
+                    uid = int(uid_s)
+                    dur = int(dur_s)
+            except Exception as e:
+                logger.warning(f"Payment link fetch failed: {e}")
+        if uid and dur:
+            exp = datetime.now() + timedelta(days=dur)
+            premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
+            _processed_payments.add(plink_id)
+            await save_all()
+            logger.info(f"Premium activated via success page for {uid}, plan={dur}d")
+            try:
+                await bot.send_message(uid,
+                    f"\U0001f389 <b>Payment Successful!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!",
+                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
+                    ]))
+            except:
+                pass
     return web.Response(
         content_type='text/html',
-        text='<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}.card{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}.check{font-size:64px;margin-bottom:16px}.btn{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/winklybot">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
     )
 
 async def auto_setup_webhook():
