@@ -1684,8 +1684,11 @@ async def edit_pref_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(EditProfile.preferred)
     await cb.message.edit_text(
         "\u270f\ufe0f <b>Edit Interested In</b>\n\n"
-        "Type: Male, Female, or Everyone",
+        "\U0001f49d <b>Who are you interested in?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👨 Male", callback_data="edit_pref:Male")],
+            [InlineKeyboardButton(text="👩 Female", callback_data="edit_pref:Female")],
+            [InlineKeyboardButton(text="👥 Everyone", callback_data="edit_pref:Everyone")],
             [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
         ])
     )
