@@ -1005,16 +1005,19 @@ async def verify_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer()
         return
     await state.set_state(Verify.photo)
-    await cb.message.edit_text(
+    text = (
         "\U0001f4f7 <b>Selfie Verification</b>\n\n"
         "Take a <b>clear selfie photo</b> with your <b>FRONT CAMERA</b>.\n\n"
-        "Your device camera will open automatically.",
-        parse_mode='HTML',
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
-            one_time_keyboard=True
-        )
+        "Your device camera will open automatically."
     )
+    markup = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
+        one_time_keyboard=True
+    )
+    try:
+        await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
+    except:
+        await cb.message.answer(text, parse_mode='HTML', reply_markup=markup)
     await cb.answer()
 
 
@@ -1031,16 +1034,19 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
     p.pop('selfie', None)
     await save_all()
     await state.set_state(Verify.photo)
-    await cb.message.edit_text(
+    text = (
         "\U0001f4f7 <b>Selfie Verification</b>\n\n"
         "Take a <b>clear selfie photo</b> with your <b>FRONT CAMERA</b>.\n\n"
-        "Your device camera will open automatically.",
-        parse_mode='HTML',
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
-            one_time_keyboard=True
-        )
+        "Your device camera will open automatically."
     )
+    markup = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
+        one_time_keyboard=True
+    )
+    try:
+        await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
+    except:
+        await cb.message.answer(text, parse_mode='HTML', reply_markup=markup)
     await cb.answer()
 
 
@@ -1311,7 +1317,7 @@ async def start_chat(cb: types.CallbackQuery):
     )
     await bot.send_message(
         pid,
-        f"\U0001f4ac <b>{user_profiles[uid]['name']}</b> started chatting!\n\nSay hi! \U0001f44b",
+        f"<b>{user_profiles[uid]['name']}</b> said: Hi!",
         parse_mode='HTML'
     )
     await cb.answer()
