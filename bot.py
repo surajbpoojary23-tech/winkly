@@ -1222,20 +1222,15 @@ async def do_match(cb: types.CallbackQuery):
         await send_match_card(pid, {**user_profiles[uid], 'uid': uid}, uid)
         await cb.answer()
         return
-    waiting_queue[uid] = {'added_at': datetime.now().isoformat()}
+    waiting_queue[uid] = {'added_at': datetime.now().isoformat(), 'retries': 0}
     online = await get_online_count()
     ql = len(waiting_queue)
     sm = await cb.message.edit_text(
         f"\U0001f465 <b>{online} people online</b> | \u23f3 <b>{ql} in queue</b>\n\n"
         f"\U0001f464 <b>{me['name']}</b>, searching for someone compatible...\n\n"
-        "Looking for someone who matches your preferences.\n"
-        "This usually takes 5-30 seconds.\n\n"
-        "\u23f3 <b>Waiting in queue...</b>\n\n"
-        "_You'll be notified when a match is found._",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f504 Cancel Search", callback_data='cancel_queue')],
-        ])
+        "\u23f3 <b>Searching (attempt 1/3)...</b>\n\n"
+        "_The search will retry up to 3 times if no match is found._",
+        parse_mode='Markdown'
     )
     _queue_msg_ids[uid] = sm.message_id
     await save_all()
@@ -1325,20 +1320,24 @@ async def say_hi(cb: types.CallbackQuery):
         return
     if not check_text_quota(uid):
         p = user_profiles.get(uid, {})
+        base = "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts. You can wait for replies or skip to find a new match."
         if p.get('gender') == 'Female' and not p.get('verified'):
             await cb.message.edit_text(
-                "⚠️ <b>You've used all your free texts.</b>\n\n"
-                "📸 Verify your profile for unlimited access.",
+                base + "\n\n\U0001f4f8 Or verify for unlimited access.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
+                    [InlineKeyboardButton(text="\U0001f4f8 Verify Now", callback_data='verify_start')],
+                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data=f'wait_in_chat:{pid}'),
+                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
                 ])
             )
         else:
             await cb.message.edit_text(
-                "⚠️ <b>You've used all your free texts.</b>\n\n"
-                "\U0001f3c6 Upgrade to premium for unlimited access.",
+                base,
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 See Premium", callback_data='see_premium')],
+                    [InlineKeyboardButton(text="\U0001f3c6 1 Day \u2014 Rs49", callback_data='premium_1day'),
+                     InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
+                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data=f'wait_in_chat:{pid}'),
+                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
                 ])
             )
         await cb.answer()
@@ -1396,6 +1395,32 @@ async def end_chat(cb: types.CallbackQuery):
     await save_all()
     await cb.answer()
 
+
+@dp.callback_query(lambda cb: cb.data == 'wait_hold')
+async def wait_hold(cb: types.CallbackQuery):
+    """Dismiss the 'account on hold' message (relay path — separate message)."""
+    await cb.message.delete()
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data.startswith('wait_in_chat:'))
+async def wait_in_chat(cb: types.CallbackQuery):
+    """Restore chat interface after 'account on hold' (say_hi path — was edited in place)."""
+    uid = cb.from_user.id
+    await mark_online(uid)
+    pid = int(cb.data.split(':', 1)[1])
+    pname = user_profiles.get(pid, {}).get('name', 'Someone')
+    await cb.message.edit_text(
+        f"\U0001f4ac <b>Chat with {pname}</b>\n\n"
+        "Send your messages below. Tap <b>Say Hi</b> to introduce yourself!\n\n"
+        "Use /stop to end the chat.",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\U0001f44b Say Hi", callback_data=f'say_hi:{pid}'),
+             InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_chat')],
+        ])
+    )
+    await cb.answer()
+
 # ─── Relay messages ───────────────────────────────────────────────────────────
 
 @dp.message(StateFilter(None))
@@ -1409,21 +1434,24 @@ async def relay(message: types.Message, state: FSMContext):
     pid = current_chat[uid]
     if not check_text_quota(uid):
         p = user_profiles[uid]
+        base = "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts. You can wait for replies or skip to find a new match."
         if p.get('gender') == 'Female' and not p.get('verified'):
             await message.answer(
-                "⚠️ <b>You've used all your free texts.</b>\n\n"
-                "📸 Verify your profile for free unlimited access.",
+                base + "\n\n\U0001f4f8 Or verify for unlimited access.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📸 Verify Now", callback_data='verify_start')],
+                    [InlineKeyboardButton(text="\U0001f4f8 Verify Now", callback_data='verify_start')],
+                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data='wait_hold'),
+                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
                 ])
             )
         else:
             await message.answer(
-                f"⚠️ <b>You've used all your free texts.</b>\n\n{quota_summary(uid)}\n\n"
-                "\U0001f3c6 Upgrade to continue:",
+                base,
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 1 Day — Rs49", callback_data='premium_1day')],
-                    [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
+                    [InlineKeyboardButton(text="\U0001f3c6 1 Day \u2014 Rs49", callback_data='premium_1day'),
+                     InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
+                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data='wait_hold'),
+                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
                 ])
             )
         return
@@ -1972,7 +2000,7 @@ async def edit_location_h(message: types.Message, state: FSMContext):
 
 # ─── Background Tasks ────────────────────────────────────────────────────────
 
-QUEUE_TIMEOUT = 240  # 4 minutes
+QUEUE_TIMEOUT = 60  # 1 minute per search attempt (up to 3 retries)
 
 async def update_counters_loop():
     while True:
@@ -1980,9 +2008,15 @@ async def update_counters_loop():
         try:
             online = await get_online_count()
             ql = len(waiting_queue)
-            status_text = f"\U0001f465 {online} online | \u23f3 {ql} in queue\n\nSearching for your match..."
             for uid, mid in list(_queue_msg_ids.items()):
-                if uid in user_profiles:
+                if uid in waiting_queue and uid in user_profiles:
+                    retries = waiting_queue[uid].get('retries', 0)
+                    attempt = min(retries + 1, 3)
+                    status_text = (
+                        f"\U0001f465 {online} online | \u23f3 {ql} in queue\n\n"
+                        f"\U0001f464 {user_profiles[uid].get('name', '?')}, searching...\n"
+                        f"\u23f3 Attempt {attempt}/3"
+                    )
                     try:
                         await bot.edit_message_text(status_text, uid, mid, parse_mode='Markdown')
                     except:
@@ -2004,26 +2038,8 @@ async def check_queue_loop():
                 if not me.get('lat'):
                     remove.append(uid)
                     continue
-                # Timeout check
-                added_str = waiting_queue[uid].get('added_at', '')
-                if added_str:
-                    try:
-                        added = datetime.fromisoformat(added_str)
-                        if (now - added).total_seconds() > QUEUE_TIMEOUT:
-                            if uid in _queue_msg_ids:
-                                try:
-                                    await bot.edit_message_text(
-                                        "\u23f9 <b>Queue timeout.</b>\n\nNo matches found this time. Try again!",
-                                        uid, _queue_msg_ids[uid], parse_mode='HTML'
-                                    )
-                                except:
-                                    pass
-                                del _queue_msg_ids[uid]
-                            remove.append(uid)
-                            continue
-                    except:
-                        pass
-                m = find_queue_match(me)
+                # Try to find a match first
+                m = find_queue_match(me, uid)
                 if m:
                     pid = m['uid']
                     active_matches.setdefault(uid, {})
@@ -2038,6 +2054,45 @@ async def check_queue_loop():
                     await save_all()
                     await send_match_card(uid, m, pid)
                     await send_match_card(pid, {**user_profiles[uid], 'uid': uid}, uid)
+                    continue
+                # Timeout check
+                added_str = waiting_queue[uid].get('added_at', '')
+                if added_str:
+                    try:
+                        added = datetime.fromisoformat(added_str)
+                        if (now - added).total_seconds() > QUEUE_TIMEOUT:
+                            retries = waiting_queue[uid].get('retries', 0)
+                            if retries < 3:
+                                # Retry — reset timer, increment counter, notify
+                                waiting_queue[uid]['retries'] = retries + 1
+                                waiting_queue[uid]['added_at'] = now.isoformat()
+                                if uid in _queue_msg_ids:
+                                    try:
+                                        await bot.edit_message_text(
+                                            f"\U0001f937\u200d\u2642\ufe0f Nobody found yet. "
+                                            f"Retrying automatically ({retries + 1}/3)...",
+                                            uid, _queue_msg_ids[uid], parse_mode='Markdown'
+                                        )
+                                    except:
+                                        pass
+                            else:
+                                # 3 attempts exhausted — give up
+                                if uid in _queue_msg_ids:
+                                    try:
+                                        await bot.edit_message_text(
+                                            "\U0001f937 <b>Nobody online nearby right now.</b>\n\n"
+                                            "Please try again later!",
+                                            uid, _queue_msg_ids[uid], parse_mode='HTML',
+                                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                                [InlineKeyboardButton(text="\u2764\ufe0f  Try Again", callback_data='do_match')],
+                                            ])
+                                        )
+                                    except:
+                                        pass
+                                    del _queue_msg_ids[uid]
+                                remove.append(uid)
+                    except:
+                        pass
             for uid in remove:
                 if uid in waiting_queue:
                     del waiting_queue[uid]
