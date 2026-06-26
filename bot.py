@@ -695,10 +695,6 @@ async def h_loc_text(message: types.Message, state: FSMContext):
 
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     data = await state.get_data()
-    try:
-        await bot.send_message(chat_id, ".", reply_markup=ReplyKeyboardRemove())
-    except:
-        pass
     prof = {
         'name': data.get('name', ''),
         'gender': data.get('gender', ''),
