@@ -1010,7 +1010,7 @@ async def verify_start(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(Verify.photo)
     await cb.message.edit_text(
         "\U0001f4f7 <b>Selfie Verification</b>\n\n"
-        "Take a <b>clear selfie photo</b> now.\n\n"
+        "Take a <b>clear selfie photo</b> with your <b>FRONT CAMERA</b>.\n\n"
         "Your device camera will open automatically.",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
@@ -1036,7 +1036,7 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
     await state.set_state(Verify.photo)
     await cb.message.edit_text(
         "\U0001f4f7 <b>Selfie Verification</b>\n\n"
-        "Take a <b>clear selfie photo</b> now.\n\n"
+        "Take a <b>clear selfie photo</b> with your <b>FRONT CAMERA</b>.\n\n"
         "Your device camera will open automatically.",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
@@ -1053,7 +1053,7 @@ async def h_verify_photo(message: types.Message, state: FSMContext):
     if not message.photo:
         await message.answer(
             "\u26a0\ufe0f <b>Send a photo, not text.</b>\n\n"
-            "Tap the button below to take a selfie.",
+            "Tap the button below to take a selfie with your <b>FRONT CAMERA</b>.",
             parse_mode='HTML',
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
