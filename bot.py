@@ -1674,6 +1674,24 @@ async def _guard_edit(state: FSMContext) -> bool:
     st = await state.get_state()
     return bool(st and st.startswith('Signup:'))
 
+@dp.callback_query(lambda cb: cb.data == 'edit_preferred')
+async def edit_pref_start(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    await mark_online(uid)
+    if await _guard_edit(state):
+        await cb.answer("⚠️ Finish signup first!", show_alert=True)
+        return
+    await state.set_state(EditProfile.preferred)
+    await cb.message.edit_text(
+        "\u270f\ufe0f <b>Edit Interested In</b>\n\n"
+        "Type: Male, Female, or Everyone",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
+        ])
+    )
+    await cb.answer()
+
+
 @dp.callback_query(lambda cb: cb.data == 'edit_gender_preferred')
 async def edit_gp(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
