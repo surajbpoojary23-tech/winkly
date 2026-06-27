@@ -2291,31 +2291,69 @@ SELFIE_PAGE = """<!DOCTYPE html>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;color:#fff;font-family:-apple-system,sans-serif;padding:16px}
-video{width:100%;max-width:400px;border-radius:12px;transform:scaleX(-1);display:none}
-#capture{margin-top:20px;padding:16px 48px;font-size:20px;border:none;border-radius:40px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600;display:none}
-#capture:disabled{opacity:.5}
-#fallback-btn{padding:16px 32px;font-size:18px;border:none;border-radius:40px;background:#1a6dc4;color:#fff;cursor:pointer;font-weight:600;margin-top:20px}
-#status{margin-top:12px;font-size:14px;text-align:center;color:#aaa}
 #file-input{display:none}
+.video-wrap{display:none;flex-direction:column;align-items:center;width:100%;max-width:400px}
+video{width:100%;border-radius:12px;transform:scaleX(-1)}
+#capture{margin-top:16px;padding:14px 40px;font-size:18px;border:none;border-radius:40px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600}
+#capture:disabled{opacity:.5}
+.open-camera-btn{margin-top:16px;padding:12px 24px;font-size:15px;border:1px solid #555;border-radius:40px;background:transparent;color:#aaa;cursor:pointer}
+#status{margin-top:14px;font-size:14px;text-align:center;color:#888}
+.main-wrap{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px}
+.main-title{font-size:22px;font-weight:700}
+.main-sub{font-size:14px;color:#888;text-align:center}
+#selfie-btn{padding:18px 48px;font-size:20px;border:none;border-radius:50px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600;width:100%;max-width:320px}
+#selfie-btn:disabled{opacity:.5}
+#cam-btn{padding:14px 32px;font-size:16px;border:1px solid #2ea043;border-radius:50px;background:transparent;color:#2ea043;cursor:pointer}
 </style></head><body>
-<video id="video" autoplay playsinline muted></video>
-<canvas id="canvas" style="display:none"></canvas>
-<button id="capture">📸 Capture Selfie</button>
-<button id="fallback-btn" style="display:none">📱 Open Camera</button>
 <input type="file" id="file-input" accept="image/*" capture="user">
-<div id="status">Opening front camera...</div>
+<div class="main-wrap" id="main-wrap">
+  <div class="main-title">📸 Selfie Verification</div>
+  <div class="main-sub">Your face must be clearly visible.<br>Good lighting, front camera recommended.</div>
+  <button id="selfie-btn">📸 Take Selfie</button>
+  <button id="cam-btn">📹 Use Camera</button>
+  <div id="status"></div>
+</div>
+<div class="video-wrap" id="video-wrap">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" style="display:none"></canvas>
+  <button id="capture">📸 Capture</button>
+  <button id="stop-btn" class="open-camera-btn">← Back</button>
+  <div id="status2"></div>
+</div>
 <script>
 Telegram.WebApp.ready();Telegram.WebApp.expand();
-const p=new URLSearchParams(window.location.search),uid=p.get('uid');
-const v=document.getElementById('video'),c=document.getElementById('canvas'),btn=document.getElementById('capture'),st=document.getElementById('status'),fb=document.getElementById('fallback-btn'),fi=document.getElementById('file-input');
-function uploadBlob(b){st.textContent='Uploading...';btn.disabled=1;const fd=new FormData();fd.append('photo',b,'selfie.jpg');fd.append('uid',uid);
-fetch('/api/upload_selfie',{method:'POST',body:fd}).then(r=>r.text()).then(t=>{if(t==='OK'){st.textContent='\u2705 Selfie uploaded! Check Telegram';setTimeout(()=>Telegram.WebApp.close(),1500)}
-else if(t==='NO_FACE'){st.textContent='\u274c No face detected. Try again';btn.disabled=0;if(v.style.display!='none')v.style.display=''}else{st.textContent='\u274c Error: '+t;btn.disabled=0}}).catch(e=>{st.textContent='Upload error: '+e.message;btn.disabled=0})}
-async function startCamera(){try{const s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'user'},width:{ideal:480},height:{ideal:640}}});v.srcObject=s;v.style.display='';btn.style.display='';fb.style.display='none';st.textContent='Look at the camera and tap Capture'}catch(e){st.textContent='Camera not available. Use the fallback button.';fb.style.display=''}}
-btn.onclick=()=>{c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.toBlob(uploadBlob,'image/jpeg',0.8)};
-fb.onclick=()=>fi.click();
-fi.onchange=()=>{const f=fi.files[0];if(f){st.textContent='Uploading...';uploadBlob(f)}};
-startCamera();
+const fi=document.getElementById('file-input'),uid=new URLSearchParams(window.location.search).get('uid');
+const main=document.getElementById('main-wrap'),vw=document.getElementById('video-wrap');
+const v=document.getElementById('video'),c=document.getElementById('canvas');
+const cap=document.getElementById('capture'),st=document.getElementById('status'),st2=document.getElementById('status2');
+const sbtn=document.getElementById('selfie-btn'),cbtn=document.getElementById('cam-btn'),stop=document.getElementById('stop-btn');
+let stream=null;
+
+function uploadBlob(b,txt){
+  st.textContent=txt||'Uploading...';cap.disabled=1;
+  const fd=new FormData();fd.append('photo',b,'selfie.jpg');fd.append('uid',uid);
+  fetch('/api/upload_selfie',{method:'POST',body:fd}).then(r=>r.text()).then(res=>{
+    if(res==='OK'){st.textContent='\u2705 Selfie uploaded! Check Telegram';setTimeout(()=>Telegram.WebApp.close(),1500)}
+    else if(res==='NO_FACE'){st.textContent='\u274c No face detected. Try again';cap.disabled=0}
+    else{st.textContent='\u274c Error: '+res;cap.disabled=0}
+  }).catch(e=>{st.textContent='Upload error: '+e.message;cap.disabled=0});
+}
+
+// File input — primary path (opens camera app directly on mobile)
+sbtn.onclick=()=>fi.click();
+fi.onchange=()=>{const f=fi.files[0];if(f)uploadBlob(f,'Uploading...')};
+
+// Camera path — getUserMedia (reliable on iOS, some Android, desktop)
+cbtn.onclick=async()=>{
+  main.style.display='none';vw.style.display='flex';st2.textContent='Opening camera...';
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'user'},width:{ideal:480},height:{ideal:640}}});
+    v.srcObject=stream;st2.textContent='Look at the camera, then tap Capture';
+    cap.style.display='';stop.style.display='';
+  }catch(e){vw.style.display='none';main.style.display='flex';st.textContent='Camera not available. Use the button above.'}
+};
+cap.onclick=()=>{if(!stream)return;c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.toBlob(b=>uploadBlob(b,'Uploading...'),'image/jpeg',0.85)};
+stop.onclick=()=>{if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}vw.style.display='none';main.style.display='flex';st.textContent=''};
 </script></body></html>"""
 
 
