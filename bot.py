@@ -1821,22 +1821,13 @@ async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     await state.set_state(Signup.location)
-    # Edit the existing message (don't delete) to show instructions
-    # while ALSO sending a reply keyboard with the location button.
-    # The inline buttons stay visible as fallback for iOS.
-    await cb.message.edit_text(
-        "\U0001f4cd <b>Share your location</b>\n\n"
-        "• Tap the button below to share your GPS location\n"
-        "• Or use the \U0001f4ce attachment menu \u2192 Location to pick from the map\n"
-        "• Or type a city name below",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
-            [InlineKeyboardButton(text="\u2328\ufe0f  Enter Place Name", callback_data="loc_enter_text")],
-        ])
-    )
-    # Send a separate message with the reply keyboard
+    await cb.message.delete()
     sent = await cb.message.answer(
-        "\U0001f4cd Tap <b>Send Location</b> below or use \U0001f4ce \u2192 Location:",
+        "\U0001f4cd <b>Share your location</b>\n\n"
+        "Tap the button below to share your GPS location.\n"
+        "If GPS is off, please turn it on in Settings, then try again.\n\n"
+        "Or use \U0001f4ce \u2192 Location to pick from the map (works without GPS).\n"
+        "Or type a city name.",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
@@ -1906,18 +1897,13 @@ async def cb_loc_share_gps_edit(cb: types.CallbackQuery, state: FSMContext):
         return
     await state.set_state(EditProfile.location)
     await state.update_data(is_editing=True)
-    await cb.message.edit_text(
-        "\U0001f4cd <b>Update your location</b>\n\n"
-        "• Tap the button below to share your GPS location\n"
-        "• Or use the \U0001f4ce attachment menu \u2192 Location to pick from the map\n"
-        "• Or type a city name below",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps_edit")],
-            [InlineKeyboardButton(text="\u2328\ufe0f  Enter Place Name", callback_data="loc_enter_text_edit")],
-        ])
-    )
+    await cb.message.delete()
     sent = await cb.message.answer(
-        "\U0001f4cd Tap <b>Send Location</b> below or use \U0001f4ce \u2192 Location:",
+        "\U0001f4cd <b>Update your location</b>\n\n"
+        "Tap the button below to share your GPS location.\n"
+        "If GPS is off, please turn it on in Settings, then try again.\n\n"
+        "Or use \U0001f4ce \u2192 Location to pick from the map (works without GPS).\n"
+        "Or type a city name.",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
