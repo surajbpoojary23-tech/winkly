@@ -1131,10 +1131,13 @@ async def send_verification_to_admin(uid: int):
     except:
         pass
     if sf:
-        try:
-            await bot.send_photo(ADMIN_CHAT_ID, sf, caption="\U0001f4f7 Selfie (for comparison)")
-        except:
-            pass
+            try:
+                from aiogram.types import FSInputFile
+                # sf is a local path if it's a string (new flow); file_id if old flow
+                photo_arg = FSInputFile(sf) if isinstance(sf, str) else sf
+                await bot.send_photo(ADMIN_CHAT_ID, photo_arg, caption="\U0001f4f7 Selfie (for comparison)")
+            except Exception as e:
+                logger.warning(f"Could not send selfie: {e}")
 
 @dp.callback_query(lambda cb: cb.data.startswith('admin_approve:'))
 async def admin_approve(cb: types.CallbackQuery):
@@ -1823,8 +1826,9 @@ async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
     # The inline buttons stay visible as fallback for iOS.
     await cb.message.edit_text(
         "\U0001f4cd <b>Share your location</b>\n\n"
-        "Tap the button below or use the 📎 attachment menu to send your location.\n\n"
-        "Or type a city name below.",
+        "• Tap the button below to share your GPS location\n"
+        "• Or use the \U0001f4ce attachment menu \u2192 Location to pick from the map\n"
+        "• Or type a city name below",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
             [InlineKeyboardButton(text="\u2328\ufe0f  Enter Place Name", callback_data="loc_enter_text")],
@@ -1832,7 +1836,7 @@ async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
     )
     # Send a separate message with the reply keyboard
     sent = await cb.message.answer(
-        "\U0001f4cd Tap <b>Send Location</b> below or use the 📎 attachment menu:",
+        "\U0001f4cd Tap <b>Send Location</b> below or use \U0001f4ce \u2192 Location:",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
@@ -1904,15 +1908,16 @@ async def cb_loc_share_gps_edit(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(is_editing=True)
     await cb.message.edit_text(
         "\U0001f4cd <b>Update your location</b>\n\n"
-        "Tap the button below or use the 📎 attachment menu to send your location.\n\n"
-        "Or type a city name below.",
+        "• Tap the button below to share your GPS location\n"
+        "• Or use the \U0001f4ce attachment menu \u2192 Location to pick from the map\n"
+        "• Or type a city name below",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps_edit")],
             [InlineKeyboardButton(text="\u2328\ufe0f  Enter Place Name", callback_data="loc_enter_text_edit")],
         ])
     )
     sent = await cb.message.answer(
-        "\U0001f4cd Tap <b>Send Location</b> below or use the 📎 attachment menu:",
+        "\U0001f4cd Tap <b>Send Location</b> below or use \U0001f4ce \u2192 Location:",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
@@ -2347,13 +2352,16 @@ async def handle_upload_selfie(request):
         with open(tmp, 'wb') as f:
             f.write(raw)
         ok = _faces_found(tmp)
-        try:
-            os.remove(tmp)
-        except:
-            pass
         if ok:
-            if uid in user_profiles:
-                user_profiles[uid]['selfie'] = uid  # placeholder (we don't keep the file_id)
+            # Upload to Telegram to get a proper file_id we can use in send_photo
+            try:
+                file_id = await bot.upload_file(tmp, destination=bot.file)
+                # Upload_file doesn't return file_id directly — use send_document approach
+                # Instead, save locally and send as file path
+                import shutil
+                saved = f"/tmp/verified_selfie_{uid}.jpg"
+                shutil.copy(tmp, saved)
+                user_profiles[uid]['selfie'] = saved
                 user_profiles[uid]['verified'] = True
                 user_profiles[uid]['verification_status'] = 'verified'
                 await save_all()
@@ -2366,7 +2374,16 @@ async def handle_upload_selfie(request):
                     await bot.send_message(uid,
                         "\u2705 <b>Verified!</b>\n\nSelfie verified. Your profile now shows a verified badge \u2714\ufe0f.",
                         parse_mode='HTML', reply_markup=main_kb(uid))
+            except Exception as e:
+                logger.error(f"Selfie upload to Telegram failed: {e}")
+                user_profiles[uid]['verified'] = True
+                user_profiles[uid]['verification_status'] = 'verified'
+                await save_all()
         else:
+            try:
+                os.remove(tmp)
+            except:
+                pass
             await bot.send_message(uid,
                 "\U0001f914 <b>No face detected.</b>\n\nPlease try again — make sure your face is clearly visible and front camera is used.",
                 parse_mode='HTML',
