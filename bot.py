@@ -2187,12 +2187,27 @@ async def handle_razorpay_webhook(request):
 
 async def payment_success_page(request):
     logger.info(f"Payment success page hit: {dict(request.query)}")
-    # Fallback activation: check query params + local map first, then Razorpay API
     plink_id = request.query.get('razorpay_payment_link_id')
     payment_id = request.query.get('razorpay_payment_id')
-    status = request.query.get('razorpay_payment_link_status')
     uid = dur = None
-    if plink_id and status == 'paid' and plink_id not in _processed_payments:
+    # Use Razorpay payments API to verify status (authoritative)
+    if payment_id and razorpay_client:
+        try:
+            p = razorpay_client.payments.fetch(payment_id)
+            if p.get('status') == 'captured':
+                notes = p.get('notes', {})
+                uid_s = notes.get('uid')
+                dur_s = notes.get('duration_days')
+                if uid_s and dur_s:
+                    uid = int(uid_s); dur = int(dur_s)
+        except Exception as e:
+            logger.warning(f"Payment fetch error: {e}")
+    # Fallback: check our local map
+    if not uid and plink_id and plink_id not in _processed_payments:
+        info = _payment_link_map.get(plink_id)
+        if info:
+            uid = info['uid']; dur = info['duration_days']
+    if uid and dur and plink_id not in _processed_payments:
         # Fast path: look up in our local map (no API call needed)
         info = _payment_link_map.get(plink_id)
         if info:
@@ -2226,7 +2241,7 @@ async def payment_success_page(request):
                 pass
     return web.Response(
         content_type='text/html',
-        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/winklybot">Open Telegram</a></div></body></html>'
     )
 
 async def auto_setup_webhook():
@@ -2333,6 +2348,19 @@ async def handle_upload_selfie(request):
         logger.error(f"Upload selfie error: {e}")
         return web.Response(text='SERVER_ERROR', status=500)
 
+
+# ─── DEV: Direct premium activation for testing (remove in production) ───────
+@dp.message(commands=['premium_activate'])
+async def cmd_activate_premium(message: types.Message):
+    uid = message.from_user.id
+    if uid != ADMIN_CHAT_ID and uid != 8624196108:  # allow self-testing
+        return
+    days = 365
+    exp = datetime.now() + timedelta(days=days)
+    premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
+    await save_all()
+    await message.answer(f"\U0001f389 <b>PREMIUM ACTIVATED!</b>\n\nValid for {days} days.\n\n\u2705 Unlimited texts and matches!",
+        parse_mode='HTML', reply_markup=main_kb(uid))
 
 # ─── Startup ───────────────────────────────────────────────────────────────
 
