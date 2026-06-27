@@ -2426,7 +2426,7 @@ async def handle_upload_selfie(request):
 
 
 # ─── DEV: Direct premium activation for testing (remove in production) ───────
-@dp.message(commands=['premium_activate'])
+@dp.message(Command('premium_activate'))
 async def cmd_activate_premium(message: types.Message):
     uid = message.from_user.id
     if uid != ADMIN_CHAT_ID and uid != 8624196108:  # allow self-testing
