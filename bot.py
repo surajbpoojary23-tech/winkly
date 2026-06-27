@@ -1818,9 +1818,21 @@ async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
     await state.set_state(Signup.location)
-    await cb.message.delete()
+    # Edit the existing message (don't delete) to show instructions
+    # while ALSO sending a reply keyboard with the location button.
+    # The inline buttons stay visible as fallback for iOS.
+    await cb.message.edit_text(
+        "\U0001f4cd <b>Share your location</b>\n\n"
+        "Tap the button below or use the 📎 attachment menu to send your location.\n\n"
+        "Or type a city name below.",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
+            [InlineKeyboardButton(text="\u2328\ufe0f  Enter Place Name", callback_data="loc_enter_text")],
+        ])
+    )
+    # Send a separate message with the reply keyboard
     sent = await cb.message.answer(
-        "\U0001f4cd Tap the <b>Send Location</b> button below:",
+        "\U0001f4cd Tap <b>Send Location</b> below or use the 📎 attachment menu:",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
@@ -1890,9 +1902,17 @@ async def cb_loc_share_gps_edit(cb: types.CallbackQuery, state: FSMContext):
         return
     await state.set_state(EditProfile.location)
     await state.update_data(is_editing=True)
-    await cb.message.delete()
+    await cb.message.edit_text(
+        "\U0001f4cd <b>Update your location</b>\n\n"
+        "Tap the button below or use the 📎 attachment menu to send your location.\n\n"
+        "Or type a city name below.",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps_edit")],
+            [InlineKeyboardButton(text="\u2328\ufe0f  Enter Place Name", callback_data="loc_enter_text_edit")],
+        ])
+    )
     sent = await cb.message.answer(
-        "\U0001f4cd Tap the <b>Send Location</b> button below:",
+        "\U0001f4cd Tap <b>Send Location</b> below or use the 📎 attachment menu:",
         parse_mode='HTML',
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="\U0001f4cd  Share My Location", request_location=True)]],
@@ -2279,28 +2299,32 @@ SELFIE_PAGE = """<!DOCTYPE html>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;color:#fff;font-family:-apple-system,sans-serif}
-video{width:100%;max-width:400px;border-radius:12px;transform:scaleX(-1)}
-#capture{margin-top:20px;padding:16px 48px;font-size:20px;border:none;border-radius:40px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600}
+body{background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;color:#fff;font-family:-apple-system,sans-serif;padding:16px}
+video{width:100%;max-width:400px;border-radius:12px;transform:scaleX(-1);display:none}
+#capture{margin-top:20px;padding:16px 48px;font-size:20px;border:none;border-radius:40px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600;display:none}
 #capture:disabled{opacity:.5}
+#fallback-btn{padding:16px 32px;font-size:18px;border:none;border-radius:40px;background:#1a6dc4;color:#fff;cursor:pointer;font-weight:600;margin-top:20px}
 #status{margin-top:12px;font-size:14px;text-align:center;color:#aaa}
+#file-input{display:none}
 </style></head><body>
-<video id="video" autoplay playsinline></video>
+<video id="video" autoplay playsinline muted></video>
 <canvas id="canvas" style="display:none"></canvas>
 <button id="capture">📸 Capture Selfie</button>
+<button id="fallback-btn" style="display:none">📱 Open Camera</button>
+<input type="file" id="file-input" accept="image/*" capture="user">
 <div id="status">Opening front camera...</div>
 <script>
+Telegram.WebApp.ready();Telegram.WebApp.expand();
 const p=new URLSearchParams(window.location.search),uid=p.get('uid');
-const v=document.getElementById('video'),c=document.getElementById('canvas'),btn=document.getElementById('capture'),st=document.getElementById('status');
-async function init(){try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:480,height:640}});v.srcObject=s;st.textContent='Look at the camera and tap Capture'}catch(e){st.textContent='Camera error: '+e.message;btn.disabled=1}}
-init();
-btn.onclick=async()=>{c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);btn.disabled=1;st.textContent='Uploading...';
-const b=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8)),fd=new FormData();fd.append('photo',b,'selfie.jpg');fd.append('uid',uid);
-try{const r=await fetch('/api/upload_selfie',{method:'POST',body:fd});const t=await r.text();
-if(t==='OK'){st.textContent='✅ Selfie uploaded! Check Telegram';setTimeout(()=>Telegram.WebApp.close(),1500)}
-else if(t==='NO_FACE'){st.textContent='❌ No face detected. Tap Capture to try again';btn.disabled=0}
-else{st.textContent='❌ Error: '+t;btn.disabled=0}
-}catch(e){st.textContent='Upload error: '+e.message;btn.disabled=0}};
+const v=document.getElementById('video'),c=document.getElementById('canvas'),btn=document.getElementById('capture'),st=document.getElementById('status'),fb=document.getElementById('fallback-btn'),fi=document.getElementById('file-input');
+function uploadBlob(b){st.textContent='Uploading...';btn.disabled=1;const fd=new FormData();fd.append('photo',b,'selfie.jpg');fd.append('uid',uid);
+fetch('/api/upload_selfie',{method:'POST',body:fd}).then(r=>r.text()).then(t=>{if(t==='OK'){st.textContent='\u2705 Selfie uploaded! Check Telegram';setTimeout(()=>Telegram.WebApp.close(),1500)}
+else if(t==='NO_FACE'){st.textContent='\u274c No face detected. Try again';btn.disabled=0;if(v.style.display!='none')v.style.display=''}else{st.textContent='\u274c Error: '+t;btn.disabled=0}}).catch(e=>{st.textContent='Upload error: '+e.message;btn.disabled=0})}
+async function startCamera(){try{const s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'user'},width:{ideal:480},height:{ideal:640}}});v.srcObject=s;v.style.display='';btn.style.display='';fb.style.display='none';st.textContent='Look at the camera and tap Capture'}catch(e){st.textContent='Camera not available. Use the fallback button.';fb.style.display=''}}
+btn.onclick=()=>{c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.toBlob(uploadBlob,'image/jpeg',0.8)};
+fb.onclick=()=>fi.click();
+fi.onchange=()=>{const f=fi.files[0];if(f){st.textContent='Uploading...';uploadBlob(f)}};
+startCamera();
 </script></body></html>"""
 
 
