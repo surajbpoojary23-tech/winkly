@@ -35,14 +35,14 @@ def _faces_found(image_path: str) -> bool:
     try:
         img = cv2.imread(image_path)
         if img is None:
-            return True  # fail-open: accept on read error
+            return False  # can't read image = reject
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
         return len(faces) >= 1
     except Exception as e:
         logger.warning(f"Face detection error: {e}")
-        return True  # fail-open: accept on error
+        return False  # fail-closed: any error = reject
 
 
 async def _verify_face(uid: int, file_id: str) -> bool:
@@ -1010,16 +1010,21 @@ async def verify_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer()
         return
     if user_profiles[uid].get('verified'):
-        await cb.message.edit_text("\u2705 You're already verified!")
+        await cb.message.edit_text("✅ You're already verified!")
         await cb.answer()
         return
+    await state.set_state(Verify.photo)
     text = (
-        "\U0001f4f7 <b>Selfie Verification</b>\n\n"
-        "Tap the button below — your <b>front camera</b> will open automatically."
+        "📸 <b>Selfie Verification</b>\n\n"
+        "Tap the button below to open your <b>front camera</b>.\n"
+        "✔️ All genders get a <b>verified badge</b>.\n"
+        "🏆 <b>Female</b> users also get <b>unlimited free access</b>!"
     )
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📸 Take Selfie", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/selfie?uid={uid}"))],
-    ])
+    markup = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
+        one_time_keyboard=True,
+        resize_keyboard=True
+    )
     try:
         await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
     except:
@@ -1036,16 +1041,22 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer()
         return
     p = user_profiles[uid]
+    p = user_profiles[uid]
     p['verification_status'] = 'none'
     p.pop('selfie', None)
     await save_all()
+    await state.set_state(Verify.photo)
     text = (
-        "\U0001f4f7 <b>Selfie Verification</b>\n\n"
-        "Tap the button below — your <b>front camera</b> will open automatically."
+        '📸 <b>Selfie Verification</b>\n\n'
+        'Tap the button below to open your <b>front camera</b>.\n'
+        '✔️ All genders get a <b>verified badge</b>.\n'
+        '🏆 <b>Female</b> users also get <b>unlimited free access</b>!'
     )
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📸 Take Selfie", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/selfie?uid={uid}"))],
-    ])
+    markup = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text='📸 Take Selfie', request_photo=True)]],
+        one_time_keyboard=True,
+        resize_keyboard=True
+    )
     try:
         await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
     except:
