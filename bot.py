@@ -1453,6 +1453,11 @@ async def relay(message: types.Message, state: FSMContext):
         return
     if uid not in current_chat:
         return
+    # If user is in any FSM state (editing profile, signup, verify),
+    # don't relay — the state-specific handler should process the message.
+    current_state = await state.get_state()
+    if current_state is not None:
+        return
     pid = current_chat[uid]
     if not check_text_quota(uid):
         p = user_profiles[uid]
