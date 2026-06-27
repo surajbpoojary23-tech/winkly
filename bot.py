@@ -2167,15 +2167,17 @@ async def handle_razorpay_webhook(request):
                     logger.warning(f"Webhook Redis save failed: {e}")
             logger.info(f"Premium activated for {uid}, plan={dur}d, until {exp}")
             try:
-                await bot.send_message(
-                    uid,
-                    f"\U0001f389 <b>Payment Successful!</b>\n\n"
-                    f"Your Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n"
-                    f"\u2705 Unlimited texts and matches!",
-                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
-                    ])
-                )
+                msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
+                if uid in current_chat:
+                    msg += "\n\n\U0001f4ac Continue chatting with your match!"
+                    await bot.send_message(uid, msg, parse_mode='HTML')
+                else:
+                    await bot.send_message(
+                        uid, msg,
+                        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
+                        ])
+                    )
             except:
                 pass
         else:
@@ -2232,16 +2234,20 @@ async def payment_success_page(request):
             await save_all()
             logger.info(f"Premium activated via success page for {uid}, plan={dur}d")
             try:
-                await bot.send_message(uid,
-                    f"\U0001f389 <b>Payment Successful!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!",
-                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
-                    ]))
+                msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
+                if uid in current_chat:
+                    msg += "\n\n\U0001f4ac Continue chatting with your match!"
+                    await bot.send_message(uid, msg, parse_mode='HTML')
+                else:
+                    await bot.send_message(uid, msg,
+                        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
+                        ]))
             except:
                 pass
     return web.Response(
         content_type='text/html',
-        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p><a class="btn" href="https://t.me/winklybot">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p>        <a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
     )
 
 async def auto_setup_webhook():
