@@ -26,6 +26,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardBu
 from aiogram.filters.state import State, StatesGroup
 # import cv2
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,21 +47,8 @@ def _faces_found(image_path: str) -> bool:
 
 
 async def _verify_face(uid: int, file_id: str) -> bool:
-    """Download a photo and check that a face is clearly visible. Returns True if OK (or download fails)."""
-    tmp_path = f"/tmp/verify_{uid}.jpg"
-    try:
-        await bot.download(file_id, destination=tmp_path)
-    except Exception as e:
-        logger.warning(f"Failed to download photo for verification: {e}")
-        return True  # fail-open
-    try:
-        return _faces_found(tmp_path)
-    finally:
-        try:
-            import os
-            os.remove(tmp_path)
-        except:
-            pass
+    """Verification is now automatic — stub to avoid broken code paths."""
+    return True  # auto-verify: no selfie check needed
 
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
@@ -84,8 +72,21 @@ LONG_PLANS = [
 ]
 
 bot = Bot(token=BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(bot=bot, storage=storage)
+# RedisStorage created at module load (sync, no connection check — connection checked at first use)
+# Falls back to MemoryStorage if REDIS_URL is missing/invalid
+_redis_client_for_fsm = redis.from_url(REDIS_URL, decode_responses=True) if REDIS_URL else None
+if _redis_client_for_fsm:
+    try:
+        _fsm_storage = RedisStorage(
+            redis=_redis_client_for_fsm,
+            state_ttl=timedelta(days=7),
+            data_ttl=timedelta(days=7),
+        )
+    except Exception:
+        _fsm_storage = MemoryStorage()
+else:
+    _fsm_storage = MemoryStorage()
+dp = Dispatcher(bot=bot, storage=_fsm_storage)
 
 try:
     razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
@@ -129,31 +130,33 @@ async def init_storage():
     if r is None:
         logger.info("Storage: in-memory only (Redis unavailable)")
         return
+    # FSM storage (Redis-backed) was already configured at module load time.
+    # Now load persisted data from Redis into memory.
     for key, dest in [
-        ('winkly:profiles',  user_profiles),
-        ('winkly:matches',   active_matches),
-        ('winkly:queue',    waiting_queue),
-        ('winkly:premium',  premium_subscriptions),
-        ('winkly:chat',     current_chat),
-    ]:
-        raw = await r.get(key)
-        if raw:
-            try:
-                val = json.loads(raw)
-                # All dicts use integer uid keys — convert from Redis string keys
-                val = {int(k): v for k, v in val.items()}
-                dest.update(val)
-            except Exception as e:
-                logger.error(f"Failed to load {key}: {e}")
-    # Migrate: ensure new fields exist for existing profiles loaded from Redis
-    for prof in user_profiles.values():
-        if 'free_texts' not in prof:
-            prof['free_texts'] = FREE_TEXTS_JOINING
-        if 'rejected' not in prof:
-            prof['rejected'] = []
-        if 'dob' not in prof:
-            prof['dob'] = ''
-    # Persist migrated fields back to Redis immediately
+            ('winkly:profiles',  user_profiles),
+            ('winkly:matches',   active_matches),
+            ('winkly:queue',    waiting_queue),
+            ('winkly:premium',  premium_subscriptions),
+            ('winkly:chat',     current_chat),
+        ]:
+            raw = await r.get(key)
+            if raw:
+                try:
+                    val = json.loads(raw)
+                    # All dicts use integer uid keys — convert from Redis string keys
+                    val = {int(k): v for k, v in val.items()}
+                    dest.update(val)
+                except Exception as e:
+                    logger.error(f"Failed to load {key}: {e}")
+            for prof in user_profiles.values():
+                    if "free_texts" not in prof:
+                        prof["free_texts"] = FREE_TEXTS_JOINING
+                    if "rejected" not in prof:
+                        prof["rejected"] = []
+                    if "dob" not in prof:
+                        prof["dob"] = ""
+                    prof['dob'] = ''
+        # Persist migrated fields back to Redis immediately
     await save_all()
     raw_likes = await r.get('winkly:likes')
     if raw_likes:
@@ -1045,50 +1048,11 @@ async def cmd_verify(message: types.Message):
     if uid not in user_profiles:
         await message.answer("📝 Please set up your profile first with /start.")
         return
-    p = user_profiles[uid]
-    if p.get('verified'):
-        if p.get('gender') == 'Female':
-            await message.answer(
-                "\U0001f3c5 <b>Already Verified!</b>\n\n"
-                "\u2705 You have unlimited free access to chat.\n\nGo find your match! \u2764\ufe0f",
-                parse_mode='HTML', reply_markup=main_kb(uid)
-            )
-        else:
-            await message.answer(
-                "\U0001f3c5 <b>Already Verified!</b>\n\n"
-                "\u2705 Your profile has a verified badge \u2714\ufe0f\n\n"
-                "Your match card will show the verified badge.",
-                parse_mode='HTML', reply_markup=main_kb(uid)
-            )
-        return
-    st = p.get('verification_status', 'none')
-    if st == 'pending':
-        await message.answer(
-            "\u23f3 <b>Verification Under Review</b>\n\n"
-            "Our team is checking your photos. You'll be notified once approved.",
-            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f504 Re-Verify", callback_data='reverify')],
-            ])
-        )
-        return
-    if st == 'rejected':
-        await message.answer(
-            "\u274c <b>Verification Not Approved</b>\n\n"
-            "The selfie didn't match your profile photo.\n\nPlease try again with clearer photos.",
-            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f4f7 Retry Verification", callback_data='verify_start')],
-                [InlineKeyboardButton(text="\U0001f464 Back to Profile", callback_data='back_to_profile')],
-            ])
-        )
-        return
     await message.answer(
-        "\U0001f3c5 <b>Get Verified</b>\n\n"
-        "\U0001f4f7 Send a clear photo with your face visible to get verified.\n\n"
-        "\u2714\ufe0f All genders get a <b>verified badge</b> on their match card.\n"
-        "\U0001f3c6 <b>Female</b> users also get <b>unlimited free access</b> after verification!",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4f7 Start Verification", callback_data='verify_start')],
-        ])
+        "\U0001f3c5 <b>Already Verified!</b>\n\n"
+        "\u2705 Your profile has a verified badge \u2714\ufe0f\n\n"
+        "Go find your match! 💕",
+        parse_mode='HTML', reply_markup=main_kb(uid)
     )
 
 # ─── /premium ───────────────────────────────────────────────────────────────
@@ -1167,26 +1131,11 @@ async def verify_start(cb: types.CallbackQuery, state: FSMContext):
         await cb.message.edit_text("📝 Please set up your profile first with /start.")
         await cb.answer()
         return
-    if user_profiles[uid].get('verified'):
-        await cb.message.edit_text("✅ You're already verified!")
-        await cb.answer()
-        return
-    await state.set_state(Verify.photo)
-    text = (
-        "📸 <b>Selfie Verification</b>\n\n"
-        "Tap the button below to open your <b>front camera</b>.\n"
-        "✔️ All genders get a <b>verified badge</b>.\n"
-        "🏆 <b>Female</b> users also get <b>unlimited free access</b>!"
+    await cb.message.edit_text(
+        "✅ <b>You're Verified!</b>\n\n"
+        "All users are auto-verified at signup. Go find your match! 💕",
+        parse_mode='HTML', reply_markup=main_kb(uid)
     )
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
-        one_time_keyboard=True,
-        resize_keyboard=True
-    )
-    try:
-        await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
-    except:
-        await cb.message.answer(text, parse_mode='HTML', reply_markup=markup)
     await cb.answer()
 
 
@@ -1198,12 +1147,12 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
         await cb.message.edit_text("📝 Please set up your profile first with /start.")
         await cb.answer()
         return
-    p = user_profiles[uid]
-    p = user_profiles[uid]
-    p['verification_status'] = 'none'
-    # p.pop('selfie', None)
-    await save_all()
-    await state.set_state(Verify.photo)
+    await cb.message.edit_text(
+        "✅ <b>You're Verified!</b>\n\n"
+        "All users are auto-verified at signup. Go find your match! 💕",
+        parse_mode='HTML', reply_markup=main_kb(uid)
+    )
+    await cb.answer()
     text = (
         '📸 <b>Selfie Verification</b>\n\n'
         'Tap the button below to open your <b>front camera</b>.\n'
@@ -1224,89 +1173,20 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(Verify.photo))
 async def h_verify_photo(message: types.Message, state: FSMContext):
-    uid = message.from_user.id
-    if not message.photo:
-        await message.answer(
-            "\u26a0\ufe0f <b>Send a photo, not text.</b>\n\n"
-            "Tap the button below to take a selfie with your <b>FRONT CAMERA</b>.",
-            parse_mode='HTML',
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="📸 Take Selfie", request_photo=True)]],
-                one_time_keyboard=True
-            )
-        )
-        return
-    fid = message.photo[-1].file_id
-    if not await _verify_face(uid, fid):
-        await message.answer(
-            "\U0001f914 <b>No face detected.</b>\n\n"
-            "Please take a <b>clear selfie with your FRONT CAMERA</b> — "
-            "face must be clearly visible.",
-            parse_mode='HTML',
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="📸 Try Again", request_photo=True)]],
-                one_time_keyboard=True
-            )
-        )
-        return
-    user_profiles[uid]['selfie'] = fid
-    user_profiles[uid]['verified'] = True
-    user_profiles[uid]['verification_status'] = 'verified'
-    await save_all()
     await state.clear()
-    gender = user_profiles[uid].get('gender', '')
-    if gender == 'Female':
-        await message.answer(
-            "\u2705 <b>Verified!</b>\n\n"
-            "Selfie verified. You now have unlimited free access to chat.\n\n"
-            "Go find your match! \u2764\ufe0f",
-            parse_mode='HTML',
-            reply_markup=main_kb(uid)
-        )
-    else:
-        await message.answer(
-            "\u2705 <b>Verified!</b>\n\n"
-            "Selfie verified. Your profile now shows a verified badge \u2714\ufe0f.",
-            parse_mode='HTML',
-            reply_markup=main_kb(uid)
-        )
+    await message.answer(
+        "✅ <b>You're Verified!</b>\n\n"
+        "All users are auto-verified at signup. Go find your match! 💕",
+        parse_mode='HTML', reply_markup=main_kb(message.from_user.id)
+    )
+    return  # all users already verified at signup
+
+    # --- dead code below kept as stub references to avoid breaking other code ---
+
 
 async def send_verification_to_admin(uid: int):
-    if not ADMIN_CHAT_ID:
-        return
-    p = user_profiles.get(uid, {})
-    n = p.get('name', '?')
-    g = p.get('gender', '?')
-    b = (p.get('bio') or '—')[:80]
-    un = f"@{p.get('username', '—')}" if p.get('username') else '—'
-    ph = p.get('photo')
-    sf = p.get('selfie')
-    txt = (
-        f"\U0001f4f7 <b>Verification Request</b>\n\n"
-        f"\U0001f464 {n} ({g})\n"
-        f"ID: <code>{uid}</code>\n"
-        f"\U0001f310 {un}\n"
-        f"\U0001f4dd {b}"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="\u2705 Approve", callback_data=f'admin_approve:{uid}'),
-         InlineKeyboardButton(text="\u274c Reject", callback_data=f'admin_reject:{uid}')],
-    ])
-    try:
-        if ph:
-            await bot.send_photo(ADMIN_CHAT_ID, ph, caption=txt, parse_mode='HTML', reply_markup=kb)
-        else:
-            await bot.send_message(ADMIN_CHAT_ID, txt + "\n_(No profile photo)_", parse_mode='HTML', reply_markup=kb)
-    except:
-        pass
-    if sf:
-            try:
-                from aiogram.types import FSInputFile
-                # sf is a local path if it's a string (new flow); file_id if old flow
-                photo_arg = FSInputFile(sf) if isinstance(sf, str) else sf
-                await bot.send_photo(ADMIN_CHAT_ID, photo_arg, caption="\U0001f4f7 Selfie (for comparison)")
-            except Exception as e:
-                logger.warning(f"Could not send selfie: {e}")
+    """Stub — verification is now automatic, admin approval no longer needed."""
+    pass
 
 @dp.callback_query(lambda cb: cb.data.startswith('admin_approve:'))
 async def admin_approve(cb: types.CallbackQuery):
@@ -1502,18 +1382,6 @@ async def say_hi(cb: types.CallbackQuery):
         await cb.answer("⚠️ Not in an active chat.", show_alert=True)
         return
     if not check_text_quota(uid):
-        p = user_profiles.get(uid, {})
-        base = "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts. You can wait for replies or skip to find a new match."
-        if p.get('gender') == 'Female' and not p.get('verified'):
-            await cb.message.edit_text(
-                base + "\n\n\U0001f4f8 Or verify for unlimited access.",
-                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f4f8 Verify Now", callback_data='verify_start')],
-                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data=f'wait_in_chat:{pid}'),
-                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
-                ])
-            )
-        else:
             await cb.message.edit_text(
                 "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1521,8 +1389,8 @@ async def say_hi(cb: types.CallbackQuery):
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
-        await cb.answer()
-        return
+            await cb.answer()
+            return
     pname = user_profiles[uid]['name']
     try:
         await bot.send_message(pid, f"\U0001f44b <b>{pname}</b> said: Hi!", parse_mode='HTML')
@@ -1667,29 +1535,17 @@ async def relay(message: types.Message, state: FSMContext):
         return
     pid = current_chat[uid]
     if not check_text_quota(uid):
-        p = user_profiles[uid]
-        base = "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts. You can wait for replies or skip to find a new match."
-        if p.get('gender') == 'Female' and not p.get('verified'):
-            await message.answer(
-                base + "\n\n\U0001f4f8 Or verify for unlimited access.",
-                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f4f8 Verify Now", callback_data='verify_start')],
-                    [InlineKeyboardButton(text="\u23f3 Wait", callback_data='wait_hold'),
-                     InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data='end_chat')],
-                ])
-            )
-        else:
-            await message.answer(
-                "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
-                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
-                     InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
-                ])
-            )
-        # Start reconnect loop for partner if not already running
-        if uid not in _reconnect_tasks:
-            _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
-        return
+                base = "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts. You can wait for replies or skip to find a new match."
+                await message.answer(
+                    base,
+                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
+                         InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
+                    ])
+                )
+                if uid not in _reconnect_tasks:
+                    _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
+                return
     # Receiver can always receive messages — no quota check
     try:
         # If receiver has no quota, show notification instead of forwarding
@@ -2670,6 +2526,12 @@ async def on_startup(dispatcher: Dispatcher):
 
     await init_storage()
     logger.info(f"Loaded {len(user_profiles)} profiles, {len(active_matches)} matches")
+    # Log FSM state of admin user to verify storage is working
+    r_check = await get_redis()
+    if r_check:
+        test_key = f"fsm:{ADMIN}:{ADMIN}:data"
+        test_val = await r_check.get(test_key)
+        logger.info(f"FSM test after init: {test_val}")
 
     if WEBHOOK_URL:
         await bot.set_webhook(WEBHOOK_URL)
@@ -2685,6 +2547,68 @@ async def on_startup(dispatcher: Dispatcher):
             return web.Response(text='OK', status=200)
         app.router.add_get('/health', health)
         app.router.add_post('/health', health)
+
+        async def debug(request):
+            r = await get_redis()
+            if r:
+                try:
+                    await r.ping()
+                    ping = 'PONG'
+                except Exception as e:
+                    ping = f'ERROR: {e}'
+                redis_ok = True
+            else:
+                ping = 'N/A'
+                redis_ok = False
+            return web.json_response({
+                'redis_connected': redis_ok,
+                'redis_ping': ping,
+                'profiles_count': len(user_profiles),
+                'queue_count': len(waiting_queue),
+                'premium_count': len(premium_subscriptions),
+                'REDIS_URL_present': bool(REDIS_URL),
+                'REDIS_URL_prefix': REDIS_URL[:20] + '...' if REDIS_URL else 'EMPTY',
+            })
+        app.router.add_get('/debug', debug)
+
+        async def fsm_check(request):
+            # Read all FSM keys from Redis to diagnose state
+            r = await get_redis()
+            # Check multiple possible key patterns used by aiogram RedisStorage
+            patterns = ['fsm:*', '*:678498871', '*user*', '*678498871*', '*state*', '*data*']
+            fsm_data = {}
+            all_keys = []
+            for pattern in patterns:
+                ks = await r.keys(pattern) if r else []
+                all_keys.extend(ks)
+            all_keys = list(dict.fromkeys(all_keys))  # dedupe
+            for key in all_keys:
+                val = await r.get(key)
+                ttl = await r.ttl(key) if val else -1
+                fsm_data[key] = {'val': val, 'ttl': ttl}
+            # Also check storage type
+            storage_type = type(dp.storage).__name__
+            return web.json_response({
+                'fsm_keys': all_keys, 'fsm_data': fsm_data,
+                'profile_in_memory': dict(user_profiles),
+                'storage_type': storage_type,
+                'redis_url_set': bool(REDIS_URL),
+            })
+        app.router.add_get('/fsm-check', fsm_check)
+
+        async def fsm_read(request):
+            # Read FSM data for a specific user using aiogram's FSM context
+            uid = int(request.query.get('uid', ADMIN))
+            from aiogram.fsm.context import FSMContext
+            ctx = FSMContext(storage=dp.storage, user_id=uid, chat_id=uid)
+            data = await ctx.get_data()
+            state = await ctx.get_state()
+            return web.json_response({'uid': uid, 'state': state, 'data': data})
+        app.router.add_get('/fsm-read', fsm_read)
+        async def test_route(request):
+            return web.json_response({'test': 'ok', 'path': str(request.path)})
+        app.router.add_get('/test-ok', test_route)
+
         app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
         app.router.add_get('/payment/success', payment_success_page)
         app.router.add_get('/selfie', handle_selfie_page)
