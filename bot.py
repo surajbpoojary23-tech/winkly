@@ -5,8 +5,8 @@ import hmac
 import json
 import logging
 import math
-        # import os  # removed
-        # import random  # removed
+# import os  # removed
+# import random  # removed
 import re
 import unicodedata
 import time
@@ -24,7 +24,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, WebAppInfo
 from aiogram.filters.state import State, StatesGroup
-        # import cv2  # removed (face detection no longer needed)
+# import cv2  # removed (face detection no longer needed)
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +57,7 @@ async def _verify_face(uid: int, file_id: str) -> bool:
         return _faces_found(tmp_path)
     finally:
         try:
-            import os
+            # import os  # removed
             os.remove(tmp_path)
         except:
             pass
@@ -2658,7 +2658,7 @@ async def on_startup(dispatcher: Dispatcher):
         BotCommand(command="profile", description="View your profile"),
         BotCommand(command="find", description="Find matches"),
         BotCommand(command="stop", description="End current chat"),
-        #         BotCommand(command="verify", description="Get Verified"),
+        # BotCommand(command="verify", description="Get Verified"),  # removed
         BotCommand(command="premium", description="View premium plans"),
         BotCommand(command="refer", description="Refer friends for free premium"),
     ]
