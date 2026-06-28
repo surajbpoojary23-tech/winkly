@@ -189,6 +189,7 @@ _queue_msg_ids: Dict[int, int] = {}
 _processed_payments: Set[str] = set()
 _payment_link_map: Dict[str, dict] = {}  # payment_link_id -> {'uid': int, 'duration_days': int}
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
+_reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
 
 class Signup(StatesGroup):
     name = State()
@@ -371,6 +372,70 @@ async def award_free_premium(uid: int):
             ]))
     except: pass
     logger.info(f"Free premium awarded to {uid}")
+
+# ─── Reconnect loop (when user is on hold, partner waits) ──────────────────
+
+def _cleanup_reconnect(uid: int):
+    """Cancel and remove the reconnect loop task for uid (the hold user)."""
+    task = _reconnect_tasks.pop(uid, None)
+    if task and not task.done():
+        task.cancel()
+
+async def _reconnect_loop(a_uid: int, b_uid: int):
+    """
+    Background loop: 18 checks x 10s = 3 minutes.
+    Checks if the hold user (a_uid) becomes premium.
+    If found → notify partner (b_uid) "reconnected".
+    If all 18 fail → notify partner with Wait/End Chat options.
+    """
+    try:
+        # Notify partner once when loop starts
+        try:
+            await bot.send_message(
+                b_uid,
+                "\u23f3 User account on hold. Trying to reconnect...",
+                parse_mode='HTML'
+            )
+        except:
+            pass
+
+        for i in range(18):
+            await asyncio.sleep(10)
+            # If chat already ended, stop
+            if a_uid not in current_chat or b_uid not in current_chat:
+                return
+            if a_uid not in user_profiles:
+                return
+            if is_premium(a_uid):
+                # Reconnected!
+                try:
+                    await bot.send_message(
+                        b_uid,
+                        "\u2705 Your match reconnected! Chat resumed.",
+                        parse_mode='HTML'
+                    )
+                except:
+                    pass
+                return
+
+        # All 18 attempts failed → notify partner with options
+        if a_uid in current_chat and b_uid in current_chat:
+            try:
+                await bot.send_message(
+                    b_uid,
+                    "user not connected yet, do you like to wait or end chat and start matching?",
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\u23f3 Wait", callback_data='wait_reconnect'),
+                         InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_reconnect')],
+                    ])
+                )
+            except:
+                pass
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _reconnect_tasks.pop(a_uid, None)
 
 async def credit_referrer(ref_code: str, new_uid: int):
     for uid in list(user_profiles.keys()):
@@ -1406,6 +1471,8 @@ async def cancel_queue(cb: types.CallbackQuery):
 async def end_chat(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
+    # Cancel reconnect loop if running (hold user ended chat)
+    _cleanup_reconnect(uid)
     partner = current_chat.pop(uid, None)
     if partner:
         current_chat.pop(partner, None)
@@ -1433,6 +1500,49 @@ async def end_chat(cb: types.CallbackQuery):
 async def wait_hold(cb: types.CallbackQuery):
     """Dismiss the 'account on hold' message (relay path — separate message)."""
     await cb.message.delete()
+    await cb.answer()
+
+
+@dp.callback_query(lambda cb: cb.data == 'wait_reconnect')
+async def wait_reconnect(cb: types.CallbackQuery):
+    """Partner clicked Wait — restart the reconnect loop."""
+    await cb.message.delete()
+    await cb.answer()
+    # Find the hold user's uid from current_chat
+    b_uid = cb.from_user.id
+    a_uid = current_chat.get(b_uid)
+    if a_uid:
+        _cleanup_reconnect(a_uid)
+        if a_uid in current_chat and not is_premium(a_uid) and not check_text_quota(a_uid):
+            _reconnect_tasks[a_uid] = asyncio.create_task(_reconnect_loop(a_uid, b_uid))
+
+
+@dp.callback_query(lambda cb: cb.data == 'end_reconnect')
+async def end_reconnect(cb: types.CallbackQuery):
+    """Partner clicked End Chat — end the chat for both."""
+    b_uid = cb.from_user.id
+    await mark_online(b_uid)
+    a_uid = current_chat.pop(b_uid, None)
+    if a_uid:
+        current_chat.pop(a_uid, None)
+        _cleanup_reconnect(a_uid)
+        if a_uid in user_profiles:
+            try:
+                await bot.send_message(
+                    a_uid,
+                    f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[b_uid]['name']} ended the chat.",
+                    parse_mode='HTML'
+                )
+            except:
+                pass
+        # Clean up active_matches
+        active_matches.get(b_uid, {}).pop(a_uid, None)
+        active_matches.get(a_uid, {}).pop(b_uid, None)
+    await save_all()
+    await cb.message.edit_text(
+        "\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
+        parse_mode='HTML', reply_markup=reengage_kb(b_uid)
+    )
     await cb.answer()
 
 
@@ -1490,6 +1600,9 @@ async def relay(message: types.Message, state: FSMContext):
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
+        # Start reconnect loop for partner if not already running
+        if uid not in _reconnect_tasks:
+            _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
         return
     # Receiver can always receive messages — no quota check
     try:
