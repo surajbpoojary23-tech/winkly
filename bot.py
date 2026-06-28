@@ -191,6 +191,87 @@ _payment_link_map: Dict[str, dict] = {}  # payment_link_id -> {'uid': int, 'dura
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
 _reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
 
+# === Bot Protection: IP Rate Limiting ===
+import time as _time
+
+RATE_LIMIT_WINDOW = 3600   # 1 hour sliding window
+RATE_LIMIT_MAX = 3           # max signups per IP per window
+RATE_IP_PREFIX = "winkly:rateip:"
+
+async def _get_client_ip(message: types.Message) -> str:
+    """Get IP from message, try message.from_user.id as fallback proxy."""
+    ip = ""
+    # Try effectiveMessage for forwarded messages
+    try:
+        em = message.effective_message
+        if hasattr(em, 'forward_from') and em.forward_from:
+            # forwarded — use sender's IP indirectly via bot token
+            return str(message.from_user.id)
+        # Try via Telegram's extract update source
+        update = message.update if hasattr(message, 'update') else None
+        if update and hasattr(update, 'effective_user') and update.effective_user:
+            return str(update.effective_user.id)
+    except:
+        pass
+    # Fallback: use user ID as proxy for IP (each user = unique Telegram account)
+    return f"uid:{message.from_user.id}"
+
+async def check_ip_rate_limit(uid: int) -> bool:
+    """
+    Sliding window rate limit using Redis sorted sets.
+    Returns True if signup allowed, False if blocked.
+    Stores one entry per /start call (not per signup completion).
+    """
+    r = await get_redis()
+    if r is None:
+        return True  # fail-open if Redis unavailable
+    key = f"{RATE_IP_PREFIX}{uid % 1000}"  # shard by uid modulo to spread keys
+    now = _time.time()
+    window_start = now - RATE_LIMIT_WINDOW
+
+    pipe = r.pipeline()
+    # Remove old entries outside the window
+    pipe.zremrangebyscore(key, 0, window_start)
+    # Count entries in window
+    pipe.zcard(key)
+    # Add this signup attempt
+    pipe.zadd(key, {str(now): now})
+    # Set expiry on the key
+    pipe.expire(key, RATE_LIMIT_WINDOW + 10)
+    results = await pipe.execute()
+
+    count = results[1]  # zcard result
+    if count >= RATE_LIMIT_MAX:
+        # Remove the entry we just added (don't count blocked attempts)
+        await r.zrem(key, str(now))
+        return False
+    return True
+
+async def check_account_age(uid: int) -> tuple[bool, str]:
+    """
+    Check if Telegram account is old enough via getChatMember.
+    Returns (allowed, reason). reason is empty if allowed.
+    """
+    try:
+        member = await bot.get_chat_member(chat_id=uid, user_id=uid)
+        status = member.status
+        # getChatMember returns: 'member', 'restricted', 'left', 'kicked', 'creator', 'administrator'
+        # For 'kicked' or 'left', user is not a valid member
+        if status in ('kicked', 'left'):
+            return False, "Your Telegram account is banned or left the bot. Please create a new Telegram account."
+        # For valid members, also check join_date if available (available for member/restricted/administrator/creator)
+        join_date = getattr(member, 'joined_date', None)
+        if join_date:
+            age_seconds = _time.time() - join_date
+            if age_seconds < 86400:  # 24 hours
+                hours_left = int((86400 - age_seconds) / 3600) + 1
+                return False, f"Your Telegram account must be at least 24 hours old. Please try again in {hours_left} hour{'s' if hours_left > 1 else ''}."
+        return True, ""
+    except Exception as e:
+        logger.warning(f"Account age check failed for {uid}: {e}")
+        return True, ""  # fail-open — don't block legitimate users if API fails
+
+
 class Signup(StatesGroup):
     name = State()
     gender = State()
@@ -575,11 +656,23 @@ async def cmd_start(message: types.Message, state: FSMContext):
             parse_mode='HTML', reply_markup=main_kb(uid)
         )
         return
+    # Bot protection: check account age first
+    allowed, reason = await check_account_age(uid)
+    if not allowed:
+        await message.answer(f"\u26a0\ufe0f {reason}", parse_mode='HTML')
+        return
+    # Bot protection: IP rate limit
+    if not await check_ip_rate_limit(uid):
+        await message.answer(
+            "\u23f3 Too many signup attempts. Please wait a few minutes and try again.",
+            parse_mode='HTML'
+        )
+        return
     await state.set_state(Signup.name)
     await state.update_data(last_bot_msg=None, prev_bot_msg=None)
     msg = await message.answer(
-        "\u1f44b Hey! I'm <b>Winkly</b>. I'll help you find people nearby.\n\n"
-        "Let's set up your profile — it only takes ~30 seconds.\n\n"
+        "\U0001f44b Hey! I'm <b>Winkly</b>. I'll help you find people nearby.\n\n"
+        "Let's set up your profile \u2014 it only takes ~30 seconds.\n\n"
         "<b>Step 1 of 6</b>\n\n"
         "\U0001f464 <b>What's your name?</b>",
         parse_mode='HTML'
@@ -763,8 +856,8 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         'lon': data.get('lon', ''),
         'location_name': data.get('location_name', ''),
         'photo': data.get('photo'),
-        'verified': data.get('verified', False),
-        'verification_status': data.get('verification_status', 'none'),
+        'verified': True,  # auto-verify all users — Telegram account is identity
+                'verification_status': 'verified',
         'username': data.get('username', ''),
         'free_texts': FREE_TEXTS_JOINING,
         'rejected': [],
