@@ -5,8 +5,8 @@ import hmac
 import json
 import logging
 import math
-# import os  # removed
-# import random  # removed
+import os
+# import random
 import re
 import unicodedata
 import time
@@ -24,7 +24,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, WebAppInfo
 from aiogram.filters.state import State, StatesGroup
-# import cv2  # removed (face detection no longer needed)
+# import cv2
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +57,7 @@ async def _verify_face(uid: int, file_id: str) -> bool:
         return _faces_found(tmp_path)
     finally:
         try:
-            # import os  # removed
+            import os
             os.remove(tmp_path)
         except:
             pass
@@ -1361,11 +1361,11 @@ async def admin_reject(cb: types.CallbackQuery):
     except:
         pass
     await bot.send_message(
-        uid,
-        "\u274c <b>Profile Removed</b>\n\n"
-        "Your profile has been removed from the verification queue.",
-        parse_mode='HTML', reply_markup=main_kb(uid)
-    )
+            uid,
+            "\u274c <b>Profile Removed</b>\n\n"
+            "Your profile has been removed from the verification queue.",
+            parse_mode='HTML', reply_markup=main_kb(uid)
+        )
     await cb.answer("\u274c Rejected")
 
 # ─── Match finding ───────────────────────────────────────────────────────────
