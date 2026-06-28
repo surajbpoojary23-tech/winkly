@@ -5,8 +5,8 @@ import hmac
 import json
 import logging
 import math
-import os
-import random
+        # import os  # removed
+        # import random  # removed
 import re
 import unicodedata
 import time
@@ -24,7 +24,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, WebAppInfo
 from aiogram.filters.state import State, StatesGroup
-import cv2
+        # import cv2  # removed (face detection no longer needed)
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
@@ -1201,7 +1201,7 @@ async def reverify(cb: types.CallbackQuery, state: FSMContext):
     p = user_profiles[uid]
     p = user_profiles[uid]
     p['verification_status'] = 'none'
-    p.pop('selfie', None)
+    # p.pop('selfie', None)
     await save_all()
     await state.set_state(Verify.photo)
     text = (
@@ -1321,7 +1321,7 @@ async def admin_approve(cb: types.CallbackQuery):
         return
     p['verified'] = True
     p['verification_status'] = 'approved'
-    p.pop('selfie', None)
+    # p.pop('selfie', None)
     await save_all()
     try:
         txt = cb.message.caption or cb.message.text
@@ -1332,7 +1332,6 @@ async def admin_approve(cb: types.CallbackQuery):
         await bot.send_message(
             uid,
             "\U0001f389 <b>You're Verified!</b>\n\n"
-            "\u2705 Your profile has been approved. You now have <b>unlimited free access</b> to chat!\n\n"
             "Go find your match! \u2764\ufe0f",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
@@ -1354,25 +1353,19 @@ async def admin_reject(cb: types.CallbackQuery):
         await cb.answer("User gone.")
         return
     p['verification_status'] = 'rejected'
-    p.pop('selfie', None)
+    # p.pop('selfie', None)
     await save_all()
     try:
         txt = cb.message.caption or cb.message.text
         await cb.message.edit_caption(caption=txt + "\n\n\u274c <b>Rejected</b>", parse_mode='HTML')
     except:
         pass
-    try:
-        await bot.send_message(
-            uid,
-            "\u274c <b>Verification Not Approved</b>\n\n"
-            "The selfie didn't match your profile photo.\n\n"
-            "You can retry anytime with clearer photos.",
-            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f4f7 Retry Verification", callback_data='verify_start')],
-            ])
-        )
-    except:
-        pass
+    await bot.send_message(
+        uid,
+        "\u274c <b>Profile Removed</b>\n\n"
+        "Your profile has been removed from the verification queue.",
+        parse_mode='HTML', reply_markup=main_kb(uid)
+    )
     await cb.answer("\u274c Rejected")
 
 # ─── Match finding ───────────────────────────────────────────────────────────
@@ -2665,7 +2658,7 @@ async def on_startup(dispatcher: Dispatcher):
         BotCommand(command="profile", description="View your profile"),
         BotCommand(command="find", description="Find matches"),
         BotCommand(command="stop", description="End current chat"),
-        BotCommand(command="verify", description="Get Verified"),
+        #         BotCommand(command="verify", description="Get Verified"),
         BotCommand(command="premium", description="View premium plans"),
         BotCommand(command="refer", description="Refer friends for free premium"),
     ]
