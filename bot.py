@@ -167,11 +167,79 @@ async def init_storage():
         _processed_payments.update(json.loads(raw_proc))
     logger.info(f"Storage loaded: {len(user_profiles)} profiles, {len(active_matches)} matches, {len(waiting_queue)} queue")
 
+    # ── FSM backup: write critical fields directly to Redis as fallback ──
+    # aiogram's RedisStorage can silently fail if the Redis client has DNS issues on some
+    # Render workers. These helpers ensure name/preferred survive by bypassing FSM.
+    async def fsm_backup_set(uid: int, field: str, value: str):
+        r = await get_redis()
+        if r:
+            await r.set(f'winkly:fsm:{uid}:{field}', value, ex=86400*7)
+
+    async def fsm_backup_get(uid: int, field: str) -> str:
+        r = await get_redis()
+        if r:
+            return await r.get(f'winkly:fsm:{uid}:{field}')
+        return None
 async def save_all():
     r = await get_redis()
     if r is None:
         return  # In-memory only, nothing to persist
     try:
+        # ── ALWAYS rebuild user_profiles directly from RedisStorage FSM ──
+        # This ensures profile data survives even if the in-memory dict is empty
+        # (which happens when a different worker handles the request)
+        all_state_keys = []
+        cursor = 0
+        while True:
+            cursor_k, keys = await r.scan(cursor, match='fsm:*:data', count=200)
+            all_state_keys.extend(keys)
+            cursor = cursor_k
+            if cursor == 0:
+                break
+        rebuilt = {}
+        for key in all_state_keys:
+            val = await r.get(key)
+            if not val:
+                continue
+            try:
+                data = json.loads(val)
+            except:
+                continue
+            # Extract uid from key like "fsm:{uid}:{uid}:data"
+            parts = key.split(':')
+            if len(parts) >= 2:
+                try:
+                    uid = int(parts[1])
+                except:
+                    continue
+                if not data.get('gender'):
+                    continue  # Skip empty/minimal FSM data
+                # Build profile from FSM data + backup keys
+                name_val = (data.get('name') or
+                            await r.get(f'winkly:fsm:{uid}:name') or '')
+                username_val = (data.get('username') or
+                                await r.get(f'winkly:fsm:{uid}:username') or '')
+                existing = user_profiles.get(uid, {})
+                rebuilt[uid] = {
+                    'name': name_val or existing.get('name', ''),
+                    'gender': data.get('gender', '') or existing.get('gender', ''),
+                    'preferred_gender': data.get('preferred', '') or existing.get('preferred_gender', ''),
+                    'bio': data.get('bio', '') or existing.get('bio', ''),
+                    'dob': data.get('dob', '') or existing.get('dob', ''),
+                    'lat': data.get('lat', '') or existing.get('lat', ''),
+                    'lon': data.get('lon', '') or existing.get('lon', ''),
+                    'location_name': data.get('location_name', '') or existing.get('location_name', ''),
+                    'photo': data.get('photo') or existing.get('photo'),
+                    'verified': data.get('verified', True) or existing.get('verified', True),
+                    'verification_status': data.get('verification_status', 'verified') or existing.get('verification_status', 'verified'),
+                    'username': username_val or existing.get('username', ''),
+                    'free_texts': data.get('free_texts') if data.get('free_texts') is not None else existing.get('free_texts', FREE_TEXTS_JOINING),
+                    'rejected': data.get('rejected') or existing.get('rejected', []),
+                }
+        # Update in-memory dict with rebuilt data
+        for uid, prof in rebuilt.items():
+            user_profiles[uid] = prof
+
         await r.set('winkly:profiles',  json.dumps(user_profiles))
         await r.set('winkly:matches',   json.dumps(active_matches))
         await r.set('winkly:queue',     json.dumps(waiting_queue))
@@ -180,7 +248,7 @@ async def save_all():
         await r.set('winkly:likes',     json.dumps({k: list(v) for k, v in likes_sent.items()}))
         await r.set('winkly:processed', json.dumps(list(_processed_payments)))
     except Exception as e:
-        logger.warning(f"Redis save failed: {e}")
+        logger.error(f"Redis save FAILED in save_all: {type(e).__name__}: {e}")
 
 user_profiles: Dict[int, dict] = {}
 active_matches: Dict[int, Dict[int, dict]] = {}
@@ -193,7 +261,6 @@ _processed_payments: Set[str] = set()
 _payment_link_map: Dict[str, dict] = {}  # payment_link_id -> {'uid': int, 'duration_days': int}
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
 _reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
-
 # === Bot Protection: IP Rate Limiting ===
 import time as _time
 
@@ -694,6 +761,8 @@ async def h_name(message: types.Message, state: FSMContext):
         await message.answer("\u26a0\ufe0f Name must be at least 2 characters.")
         return
     await state.update_data(name=name, username=message.from_user.username or '')
+    await fsm_backup_set(uid, 'name', name)
+    await fsm_backup_set(uid, 'username', message.from_user.username or '')
     await state.set_state(Signup.dob)
     msg = await message.answer(
             "<b>Step 2 of 6</b>\n\n"
@@ -750,6 +819,7 @@ async def h_preferred(message: types.Message, state: FSMContext):
         ]))
         return
     await state.update_data(preferred=PREF_KW[keyword])
+    await fsm_backup_set(uid, 'preferred', PREF_KW[keyword])
     d = await state.get_data()
     if d.get('prev_bot_msg'):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
@@ -787,6 +857,9 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
+    await fsm_backup_set(uid, 'lat', str(loc.latitude))
+    await fsm_backup_set(uid, 'lon', str(loc.longitude))
+    await fsm_backup_set(uid, 'location_name', 'GPS')
     await state.set_state(Signup.bio)
     msg = await message.answer(
         "<b>Step 6 of 6</b>\n\n"
@@ -830,6 +903,9 @@ async def h_loc_text(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(lat=str(lat), lon=str(lon), location_name=text)
+    await fsm_backup_set(uid, 'lat', str(lat))
+    await fsm_backup_set(uid, 'lon', str(lon))
+    await fsm_backup_set(uid, 'location_name', text)
     await state.set_state(Signup.bio)
     msg = await message.answer(
         "<b>Step 6 of 6</b>\n\n"
@@ -848,25 +924,48 @@ async def h_loc_text(message: types.Message, state: FSMContext):
 
 
 async def finish_signup(state: FSMContext, chat_id: int, uid: int):
-    data = await state.get_data()
-    prof = {
-        'name': data.get('name', ''),
-        'gender': data.get('gender', ''),
-        'preferred_gender': data.get('preferred', ''),
-        'bio': data.get('bio', ''),
-        'dob': data.get('dob', ''),
-        'lat': data.get('lat', ''),
-        'lon': data.get('lon', ''),
-        'location_name': data.get('location_name', ''),
-        'photo': data.get('photo'),
-        'verified': True,  # auto-verify all users — Telegram account is identity
-                'verification_status': 'verified',
-        'username': data.get('username', ''),
-        'free_texts': FREE_TEXTS_JOINING,
-        'rejected': [],
-    }
-    user_profiles[uid] = prof
-    await save_all()
+    logger.info(f"finish_signup START: uid={uid}")
+    try:
+        data = await state.get_data()
+        logger.info(f"finish_signup data keys: {list(data.keys())}")
+        name_val = data.get('name') or await fsm_backup_get(uid, 'name') or ''
+        logger.info(f"finish_signup name: '{name_val}'")
+        prof = {
+            'name': name_val,
+            'gender': data.get('gender', ''),
+            'preferred_gender': data.get('preferred', ''),
+            'bio': data.get('bio', ''),
+            'dob': data.get('dob', ''),
+            'lat': data.get('lat', ''),
+            'lon': data.get('lon', ''),
+            'location_name': data.get('location_name', ''),
+            'photo': data.get('photo'),
+            'verified': True,
+            'verification_status': 'verified',
+            'username': (data.get('username') or await fsm_backup_get(uid, 'username') or ''),
+            'free_texts': FREE_TEXTS_JOINING,
+            'rejected': [],
+        }
+        logger.info(f"finish_signup prof built: {prof.get('name')}")
+        user_profiles[uid] = prof
+        logger.info(f"finish_signup: user_profiles[{uid}] set, profiles_in_memory={len(user_profiles)}")
+        logger.info(f"finish_signup: about to call get_redis()...")
+        # Direct atomic write — bypasses save_all() which may fail across workers
+        r = await get_redis()
+        if r:
+            try:
+                raw = await r.get('winkly:profiles')
+                all_profiles = json.loads(raw) if raw else {}
+                all_profiles[str(uid)] = prof
+                await r.set('winkly:profiles', json.dumps(all_profiles))
+                logger.info(f"finish_signup: direct Redis write done, keys={list(all_profiles.keys())}")
+            except Exception as e:
+                logger.error(f"finish_signup Redis write FAILED: {e}")
+        else:
+            logger.warning("finish_signup: get_redis() returned None, profile only in memory")
+    except Exception as e:
+        logger.error(f"finish_signup EXCEPTION: {type(e).__name__}: {e}")
+        raise
     ref = data.get('ref_code')
     ref_valid = False
     if ref:
@@ -1875,6 +1974,7 @@ async def cb_pref(cb: types.CallbackQuery, state: FSMContext):
     await mark_online(uid)
     preferred = cb.data.split(':', 1)[1]
     await state.update_data(preferred=preferred, prev_bot_msg=None)
+    await fsm_backup_set(uid, 'preferred', preferred)
     await state.set_state(Signup.location)
     await cb.message.edit_text(
         "<b>Step 5 of 6</b>\n\n"
@@ -1926,12 +2026,14 @@ async def cb_loc_enter_text(cb: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(lambda cb: cb.data == 'signup_skip_bio')
 async def cb_skip_bio(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
+    logger.info(f"cb_skip_bio: uid={uid}, state={await state.get_state()}")
     await mark_online(uid)
     d = await state.get_data()
     if d.get('prev_bot_msg'):
         await safe_delete(cb.message.chat.id, d['prev_bot_msg'])
     await state.update_data(bio='')
     await finish_signup(state, cb.message.chat.id, uid)
+    logger.info(f"cb_skip_bio done: uid={uid}, profiles={len(user_profiles)}")
     await cb.answer()
 
 
@@ -2529,9 +2631,9 @@ async def on_startup(dispatcher: Dispatcher):
     # Log FSM state of admin user to verify storage is working
     r_check = await get_redis()
     if r_check:
-        test_key = f"fsm:{ADMIN}:{ADMIN}:data"
+        test_key = f"fsm:{ADMIN_CHAT_ID}:{ADMIN_CHAT_ID}:data"
         test_val = await r_check.get(test_key)
-        logger.info(f"FSM test after init: {test_val}")
+        logger.info(f"FSM test after init: uid={ADMIN_CHAT_ID} key={test_key} val={test_val}")
 
     if WEBHOOK_URL:
         await bot.set_webhook(WEBHOOK_URL)
@@ -2608,6 +2710,85 @@ async def on_startup(dispatcher: Dispatcher):
         async def test_route(request):
             return web.json_response({'test': 'ok', 'path': str(request.path)})
         app.router.add_get('/test-ok', test_route)
+
+        async def test_fsm_backup_endpoint(request):
+            '''Test direct Redis access'''
+            uid = 678498871
+            import time
+            r = await get_redis()
+            if not r:
+                return web.json_response({'error': 'no redis'}, status=500)
+            test_val = f'test_{int(time.time())}'
+            # Write directly to Redis (simulating what fsm_backup_set does)
+            await r.set(f'winkly:fsm:{uid}:test_key', test_val, ex=86400*7)
+            result = await r.get(f'winkly:fsm:{uid}:test_key')
+            return web.json_response({'set': test_val, 'got': result})
+
+        async def test_save(request):
+            # Read FSM data and save directly (not relying on user_profiles in this worker)
+            uid = 678498871
+            from aiogram.fsm.context import FSMContext
+            ctx = FSMContext(storage=dp.storage, user_id=uid, chat_id=uid)
+            data = await ctx.get_data()
+            name_val = data.get('name') or await fsm_backup_get(uid, 'name') or ''
+            prof = {
+                'name': name_val,
+                'gender': data.get('gender', ''),
+                'preferred_gender': data.get('preferred', ''),
+                'bio': data.get('bio', ''),
+                'dob': data.get('dob', ''),
+                'lat': data.get('lat', ''),
+                'lon': data.get('lon', ''),
+                'location_name': data.get('location_name', ''),
+                'photo': data.get('photo'),
+                'verified': True,
+                'verification_status': 'verified',
+                'username': data.get('username', ''),
+                'free_texts': FREE_TEXTS_JOINING,
+                'rejected': [],
+            }
+            user_profiles[uid] = prof
+            r2 = await get_redis()
+            if r2:
+                try:
+                    raw = await r2.get('winkly:profiles') or '{}'
+                    all_profiles = json.loads(raw)
+                    all_profiles[str(uid)] = prof
+                    await r2.set('winkly:profiles', json.dumps(all_profiles))
+                    return web.json_response({'in_memory': len(user_profiles), 'saved': True, 'prof_name': prof.get('name')})
+                except Exception as e:
+                    return web.json_response({'error': str(e)}, status=500)
+            return web.json_response({'in_memory': len(user_profiles), 'saved': False})
+        async def force_finish(request):
+            # Direct: read FSM for uid, save to user_profiles and Redis
+            uid = 678498871
+            from aiogram.fsm.context import FSMContext
+            ctx = FSMContext(storage=dp.storage, user_id=uid, chat_id=uid)
+            data = await ctx.get_data()
+            name_val = data.get('name') or await fsm_backup_get(uid, 'name') or ''
+            prof = {
+                'name': name_val,
+                'gender': data.get('gender', ''),
+                'preferred_gender': data.get('preferred', ''),
+                'bio': data.get('bio', ''),
+                'dob': data.get('dob', ''),
+                'lat': data.get('lat', ''),
+                'lon': data.get('lon', ''),
+                'location_name': data.get('location_name', ''),
+                'photo': data.get('photo'),
+                'verified': True,
+                'verification_status': 'verified',
+                'username': data.get('username', ''),
+                'free_texts': FREE_TEXTS_JOINING,
+                'rejected': [],
+            }
+            user_profiles[uid] = prof
+            await save_all()
+            r2 = await get_redis()
+            profiles_val = await r2.get('winkly:profiles') if r2 else None
+            return web.json_response({'data': data, 'prof': prof, 'saved': profiles_val})
+        app.router.add_get('/force-finish', force_finish)
+        app.router.add_post('/force-finish', force_finish)
 
         app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
         app.router.add_get('/payment/success', payment_success_page)

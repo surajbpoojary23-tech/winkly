@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
+ARG DEPLOY_TIME
+RUN echo "Deploy: $DEPLOY_TIME"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libjpeg-dev \
