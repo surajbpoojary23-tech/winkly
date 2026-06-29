@@ -924,6 +924,8 @@ async def reconcile_paid_payment_link(link_id: str):
     if not pending:
         logger.warning(f"Payment reconciliation skipped for unknown link: {link_id}")
         return {"activated": False, "reason": "unknown_link"}
+    if pending.get("status") == "paid" and pending.get("payment_id"):
+        return {"activated": True, "reason": "already_paid"}
 
     plan_id = pending.get("plan_id")
     plan = PLAN_CATALOG.get(plan_id)
