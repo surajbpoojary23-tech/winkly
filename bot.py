@@ -156,6 +156,8 @@ async def init_storage():
                     if "dob" not in prof:
                         prof["dob"] = ""
                     prof['dob'] = ''
+                    if "received_texts" not in prof:
+                        prof["received_texts"] = 0
         # Persist migrated fields back to Redis immediately
     await save_all()
     raw_likes = await r.get('winkly:likes')
@@ -456,6 +458,7 @@ async def get_online_count() -> int:
     except: return len(user_profiles)
 
 FREE_TEXTS_JOINING = 20
+RECEIVE_LIMIT = 20
 
 def is_premium(uid: int) -> bool:
     if uid not in premium_subscriptions: return False
@@ -515,6 +518,8 @@ async def referral_count(uid: int) -> int:
 async def award_free_premium(uid: int):
     exp = datetime.now() + timedelta(days=1)
     premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
+    if uid in user_profiles:
+        user_profiles[uid]['received_texts'] = 0
     await save_all()
     try:
         await bot.send_message(uid,
@@ -946,6 +951,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
             'username': (data.get('username') or await fsm_backup_get(uid, 'username') or ''),
             'free_texts': FREE_TEXTS_JOINING,
             'rejected': [],
+            'received_texts': 0,
         }
         logger.info(f"finish_signup prof built: {prof.get('name')}")
         user_profiles[uid] = prof
@@ -1646,6 +1652,33 @@ async def relay(message: types.Message, state: FSMContext):
                 if uid not in _reconnect_tasks:
                     _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
                 return
+    # Receiver's receive limit: Male/Other without premium limited to RECEIVE_LIMIT total
+    p_receiver = user_profiles.get(pid)
+    if p_receiver and p_receiver.get('gender') in ('Male', 'Other') and not is_premium(pid):
+        received = p_receiver.get('received_texts', 0)
+        if received >= RECEIVE_LIMIT:
+            # Reuse the existing "Account on hold" bubble for the sender
+            pname = user_profiles[uid].get('name', 'Someone')
+            n = _quota_notif.get(uid)
+            count = (n['count'] + 1) if n else 1
+            text = f"\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts."
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
+                 InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
+            ])
+            if n:
+                try:
+                    await bot.edit_message_text(text, uid, n['mid'], parse_mode='HTML', reply_markup=kb)
+                except:
+                    msg = await bot.send_message(uid, text, parse_mode='HTML', reply_markup=kb)
+                    _quota_notif[uid] = {'mid': msg.message_id, 'count': count}
+                else:
+                    _quota_notif[uid] = {'mid': n['mid'], 'count': count}
+            else:
+                msg = await bot.send_message(uid, text, parse_mode='HTML', reply_markup=kb)
+                _quota_notif[uid] = {'mid': msg.message_id, 'count': count}
+            await save_all()
+            return
     # Receiver can always receive messages — no quota check
     try:
         # If receiver has no quota, show notification instead of forwarding
@@ -1674,6 +1707,10 @@ async def relay(message: types.Message, state: FSMContext):
             return
         await bot.copy_message(pid, message.chat.id, message.message_id)
         consume_text(uid)
+        # Increment receiver's received_texts (for Male/Other without premium)
+        p_recv = user_profiles.get(pid)
+        if p_recv and p_recv.get('gender') in ('Male', 'Other') and not is_premium(pid):
+            p_recv['received_texts'] = p_recv.get('received_texts', 0) + 1
         await save_all()
     except:
         await message.answer("⚠️ Couldn't deliver your message.")
@@ -2342,6 +2379,8 @@ async def handle_razorpay_webhook(request):
             dur = int(dur_s)
             exp = datetime.now() + timedelta(days=dur)
             premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
+            if uid in user_profiles:
+                user_profiles[uid]['received_texts'] = 0
             _processed_payments.add(payment_id)
             r = await get_redis()
             if r:
@@ -2415,6 +2454,8 @@ async def payment_success_page(request):
         if uid and dur:
             exp = datetime.now() + timedelta(days=dur)
             premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
+            if uid in user_profiles:
+                user_profiles[uid]['received_texts'] = 0
             _processed_payments.add(plink_id)
             await save_all()
             logger.info(f"Premium activated via success page for {uid}, plan={dur}d")
@@ -2603,6 +2644,8 @@ async def cmd_activate_premium(message: types.Message):
     days = 365
     exp = datetime.now() + timedelta(days=days)
     premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
+    if uid in user_profiles:
+        user_profiles[uid]['received_texts'] = 0
     await save_all()
     await message.answer(f"\U0001f389 <b>PREMIUM ACTIVATED!</b>\n\nValid for {days} days.\n\n\u2705 Unlimited texts and matches!",
         parse_mode='HTML', reply_markup=main_kb(uid))
@@ -2749,6 +2792,7 @@ async def on_startup(dispatcher: Dispatcher):
                 'username': data.get('username', ''),
                 'free_texts': FREE_TEXTS_JOINING,
                 'rejected': [],
+                'received_texts': 0,
             }
             user_profiles[uid] = prof
             r2 = await get_redis()
@@ -2784,6 +2828,7 @@ async def on_startup(dispatcher: Dispatcher):
                 'username': data.get('username', ''),
                 'free_texts': FREE_TEXTS_JOINING,
                 'rejected': [],
+                'received_texts': 0,
             }
             user_profiles[uid] = prof
             await save_all()
