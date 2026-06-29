@@ -1544,11 +1544,45 @@ async def do_match(cb: types.CallbackQuery):
 async def send_match_card(cid: int, partner: dict, pid: int):
     n = partner.get('name', '?')
     g = partner.get('gender', '?')
-    txt = (
-        f"🎉 <b>It's a match!</b>\n\n"
-        f"You and <b>{n}</b> seem to be on the same wavelength.\n\n"
-        f"Say something nice. 💬"
-    )
+    g_short = {"Male": "M", "Female": "F", "Other": "O"}.get(g, "")
+    dob_raw = partner.get('dob', '')
+    loc = partner.get('location_name', '')
+
+    # Age
+    age = ""
+    if dob_raw:
+        dob = parse_dob(dob_raw)
+        if dob:
+            age = str(calc_age(dob))
+
+    # Verified badge
+    vb = " ✅" if partner.get('verified') else ""
+
+    # Distance
+    dist_str = ""
+    me = user_profiles.get(cid)
+    if me and me.get('lat') is not None and partner.get('lat') is not None:
+        try:
+            d = haversine(float(me['lat']), float(me['lon']), float(partner['lat']), float(partner['lon']))
+            dist_str = f"{'Less than 1' if d < 1 else f'{round(d, 1)}'} km away"
+        except (ValueError, TypeError):
+            pass
+
+    lines = [
+        f"🎉 <b>It's a match with {n}!</b>",
+        "",
+        f"👤 <b>{n}</b>, {age}{g_short}{vb}",
+    ]
+    if loc:
+        lines.append(f"📍 location: {loc}")
+    if dist_str:
+        lines.append(f"📏 Distance: {dist_str}")
+    lines += [
+        "",
+        "Say something nice. 💬",
+    ]
+    txt = "\n".join(lines)
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Chat Now", callback_data=f'chat:{pid}')],
     ])
