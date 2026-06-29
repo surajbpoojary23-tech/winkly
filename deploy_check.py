@@ -24,7 +24,7 @@ def check_required_environment() -> bool:
         'RAZORPAY_WEBHOOK_SECRET',
     ]
     if _present('WEBHOOK_URL'):
-        required_vars.extend(['TELEGRAM_WEBHOOK_SECRET', 'TELEGRAM_WEBHOOK_PATH'])
+        required_vars.append('TELEGRAM_WEBHOOK_PATH')
 
     missing = [name for name in required_vars if not _present(name)]
     if missing:
@@ -54,8 +54,12 @@ def check_port_binding() -> bool:
 def check_webhook_config() -> bool:
     webhook_url = os.getenv('WEBHOOK_URL', '').strip()
     if not webhook_url:
-        print("OK WEBHOOK_URL not set; bot will use long polling")
-        return True
+        if os.getenv('ALLOW_LONG_POLLING', '').strip().lower() in {'1', 'true', 'yes'}:
+            print("OK WEBHOOK_URL not set; long polling explicitly enabled")
+            return True
+        print("FAIL WEBHOOK_URL is required for deployment")
+        print("Set ALLOW_LONG_POLLING=true only for local single-instance polling")
+        return False
 
     parsed = urlparse(webhook_url)
     if parsed.scheme != 'https' or not parsed.netloc:
@@ -63,9 +67,12 @@ def check_webhook_config() -> bool:
         return False
 
     secret = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
-    if len(secret) < 32:
+    if secret and len(secret) < 32:
         print("FAIL TELEGRAM_WEBHOOK_SECRET must be at least 32 characters")
         return False
+    if not secret:
+        print("OK TELEGRAM_WEBHOOK_SECRET not set; bot will derive one from BOT_TOKEN")
+        return True
 
     print("OK webhook configuration is valid")
     return True

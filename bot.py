@@ -64,10 +64,17 @@ REDIS_URL = os.getenv('REDIS_URL', '')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', '').rstrip('/')
 PORT = int(os.getenv('PORT', '8080'))
 ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', '0'))
+ALLOW_LONG_POLLING = os.getenv('ALLOW_LONG_POLLING', '').strip().lower() in {'1', 'true', 'yes'}
 TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
 TELEGRAM_WEBHOOK_PATH = os.getenv('TELEGRAM_WEBHOOK_PATH', '/telegram/webhook')
 if not TELEGRAM_WEBHOOK_PATH.startswith('/'):
     TELEGRAM_WEBHOOK_PATH = '/' + TELEGRAM_WEBHOOK_PATH
+if WEBHOOK_URL and not TELEGRAM_WEBHOOK_SECRET:
+    TELEGRAM_WEBHOOK_SECRET = hmac.new(
+        BOT_TOKEN.encode(),
+        b'winkly-telegram-webhook-secret',
+        hashlib.sha256,
+    ).hexdigest()
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
@@ -3051,7 +3058,12 @@ async def on_startup(dispatcher: Dispatcher):
         asyncio.create_task(check_queue_loop())
         await asyncio.Event().wait()
     else:
-        logger.info("No WEBHOOK_URL - long-polling mode")
+        if not ALLOW_LONG_POLLING:
+            raise RuntimeError(
+                "WEBHOOK_URL is required for deployment. "
+                "Set ALLOW_LONG_POLLING=true only for local single-instance polling."
+            )
+        logger.info("No WEBHOOK_URL - long-polling mode explicitly enabled")
         await bot.delete_webhook(drop_pending_updates=True)
         asyncio.create_task(update_counters_loop())
         asyncio.create_task(check_queue_loop())
