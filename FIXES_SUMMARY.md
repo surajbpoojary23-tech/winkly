@@ -160,7 +160,7 @@ WEBHOOK_URL=https://your-service.onrender.com/
 
 1. **Set Environment Variables**:
    ```bash
-   BOT_TOKEN=8624196108:AAGeeViOr46SLjrzkQSGSStOSO6iuKvZIjw
+   BOT_TOKEN=replace_with_telegram_bot_token
    REDIS_URL=your_upstash_redis_url
    PORT=8080
    WEBHOOK_URL=https://your-service.onrender.com/
@@ -181,7 +181,7 @@ WEBHOOK_URL=https://your-service.onrender.com/
 
 1. **Set Environment Variables**:
    ```bash
-   BOT_TOKEN=8624196108:AAGeeViOr46SLjrzkQSGSStOSO6iuKvZIjw
+   BOT_TOKEN=replace_with_telegram_bot_token
    REDIS_URL=your_upstash_redis_url
    ```
 

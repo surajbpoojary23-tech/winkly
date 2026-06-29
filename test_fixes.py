@@ -12,7 +12,7 @@ from pathlib import Path
 
 def test_process_lock():
     """Test that the process lock prevents multiple instances."""
-    print("🧪 Testing process lock functionality...")
+    print("Testing process lock functionality...")
     
     # Create a temporary directory for testing
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -26,28 +26,29 @@ def test_process_lock():
         
         lock1 = ProcessLock(str(lock_file))
         if lock1.acquire():
-            print("   ✅ First instance acquired lock")
+            print("   First instance acquired lock")
             
             # Test 2: Second instance should fail
             lock2 = ProcessLock(str(lock_file))
             if not lock2.acquire():
-                print("   ✅ Second instance correctly rejected")
+                print("   Second instance correctly rejected")
                 lock1.release()
                 return True
             else:
-                print("   ❌ Second instance incorrectly acquired lock")
+                print("   Second instance incorrectly acquired lock")
                 lock1.release()
                 return False
         else:
-            print("   ❌ First instance failed to acquire lock")
+            print("   First instance failed to acquire lock")
             return False
 
 def test_port_configuration():
     """Test port configuration."""
-    print("🧪 Testing port configuration...")
+    print("Testing port configuration...")
     
     # Test default port
     os.environ['PORT'] = '8080'
+    os.environ.setdefault('BOT_TOKEN', '123456:test_token')
     from bot import on_startup
     
     # Check if the bot reads PORT environment variable
@@ -55,25 +56,30 @@ def test_port_configuration():
     try:
         port_num = int(port)
         if 1 <= port_num <= 65535:
-            print(f"   ✅ Port {port} is valid")
+            print(f"   Port {port} is valid")
             return True
         else:
-            print(f"   ❌ Port {port} is out of range")
+            print(f"   Port {port} is out of range")
             return False
     except ValueError:
-        print(f"   ❌ Port '{port}' is not a valid number")
+        print(f"   Port '{port}' is not a valid number")
         return False
 
 def test_deployment_check():
     """Test the deployment check script."""
-    print("🧪 Testing deployment check script...")
+    print("Testing deployment check script...")
     
     # Set up test environment variables
     test_env = {
         'BOT_TOKEN': 'test_token',
         'REDIS_URL': 'redis://test:6379',
         'PORT': '8080',
-        'WEBHOOK_URL': 'https://test.onrender.com/'
+        'WEBHOOK_URL': 'https://test.onrender.com',
+        'TELEGRAM_WEBHOOK_PATH': '/telegram/webhook',
+        'TELEGRAM_WEBHOOK_SECRET': 'x' * 32,
+        'RAZORPAY_KEY_ID': 'rzp_test_key',
+        'RAZORPAY_KEY_SECRET': 'test_secret',
+        'RAZORPAY_WEBHOOK_SECRET': 'test_webhook_secret',
     }
     
     # Run deploy_check.py
@@ -86,10 +92,10 @@ def test_deployment_check():
     )
     
     if result.returncode == 0:
-        print("   ✅ Deployment check passed")
+        print("   Deployment check passed")
         return True
     else:
-        print(f"   ❌ Deployment check failed: {result.stderr}")
+        print(f"   Deployment check failed: {result.stdout}{result.stderr}")
         return False
 
 def main():
@@ -105,26 +111,26 @@ def main():
     failed = 0
     
     for test_name, test_func in tests:
-        print(f"\n📋 Running {test_name} test...")
+        print(f"\nRunning {test_name} test...")
         try:
             if test_func():
                 passed += 1
             else:
                 failed += 1
         except Exception as e:
-            print(f"   ❌ Test failed with exception: {e}")
+            print(f"   Test failed with exception: {e}")
             failed += 1
     
     print("\n=== Test Results ===")
-    print(f"✅ Passed: {passed}")
-    print(f"❌ Failed: {failed}")
-    print(f"📊 Total: {passed + failed}")
+    print(f"Passed: {passed}")
+    print(f"Failed: {failed}")
+    print(f"Total: {passed + failed}")
     
     if failed == 0:
-        print("\n🎉 All tests passed! The fixes are working correctly.")
+        print("\nAll tests passed! The fixes are working correctly.")
         sys.exit(0)
     else:
-        print(f"\n⚠️  {failed} test(s) failed. Please review the fixes.")
+        print(f"\n{failed} test(s) failed. Please review the fixes.")
         sys.exit(1)
 
 if __name__ == '__main__':

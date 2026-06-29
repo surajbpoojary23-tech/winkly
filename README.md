@@ -23,6 +23,7 @@ cp .env.example .env
 # Edit .env and set:
 #   BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 #   REDIS_URL=YOUR_UPSTASH_REDIS_URL (e.g. redis://...)
+#   TELEGRAM_WEBHOOK_SECRET=RANDOM_32_PLUS_CHARACTER_SECRET
 python bot.py
 ```
 The bot will start polling. Open Telegram, send `/start`, share your location and tap *❤️  Find Matches*.
@@ -35,14 +36,18 @@ The bot will start polling. Open Telegram, send `/start`, share your location an
    - `BOT_TOKEN` – the token you received from @BotFather.
    - `REDIS_URL` – your Upstash Redis endpoint (e.g. `rediss://...`).
    - `PORT` – port to bind to (default: 8080, required for webhook mode)
-   - `WEBHOOK_URL` – full webhook URL (e.g. `https://your-service.onrender.com/`)
+   - `WEBHOOK_URL` – public base URL (e.g. `https://your-service.onrender.com`)
+   - `TELEGRAM_WEBHOOK_PATH` – Telegram webhook path (default: `/telegram/webhook`)
+   - `TELEGRAM_WEBHOOK_SECRET` – random 32+ character Telegram webhook secret
+   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
 5. Deploy. Render will build the Docker image and start the container.
 
 ### ⚠️ Important: Fix TelegramConflictError
 The error "Conflict: terminated by other getUpdates request" occurs when multiple bot instances run simultaneously. To fix this:
 
 **Option 1: Use Webhook Mode (Recommended)**
-- Set `WEBHOOK_URL` to your Render service URL (e.g. `https://your-service.onrender.com/`)
+- Set `WEBHOOK_URL` to your Render service base URL (e.g. `https://your-service.onrender.com`)
+- Set `TELEGRAM_WEBHOOK_SECRET` so Telegram requests are authenticated
 - This eliminates polling conflicts and is more reliable for production
 
 **Option 2: Use Long-Polling with Single Instance**

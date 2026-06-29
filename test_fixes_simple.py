@@ -71,7 +71,12 @@ def test_deployment_check():
         'BOT_TOKEN': 'test_token',
         'REDIS_URL': 'redis://test:6379',
         'PORT': '8080',
-        'WEBHOOK_URL': 'https://test.onrender.com/'
+        'WEBHOOK_URL': 'https://test.onrender.com',
+        'TELEGRAM_WEBHOOK_PATH': '/telegram/webhook',
+        'TELEGRAM_WEBHOOK_SECRET': 'x' * 32,
+        'RAZORPAY_KEY_ID': 'rzp_test_key',
+        'RAZORPAY_KEY_SECRET': 'test_secret',
+        'RAZORPAY_WEBHOOK_SECRET': 'test_webhook_secret',
     }
     
     # Run deploy_check.py
@@ -87,7 +92,7 @@ def test_deployment_check():
         print("   Deployment check passed")
         return True
     else:
-        print(f"   Deployment check failed: {result.stderr}")
+        print(f"   Deployment check failed: {result.stdout}{result.stderr}")
         return False
 
 def main():

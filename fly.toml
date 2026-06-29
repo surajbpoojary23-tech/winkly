@@ -3,8 +3,9 @@ primary_region = "iad"
 [build]
   image = "docker.io/library/winkly_bot:latest"
 [env]
-  BOT_TOKEN="YOUR_BOT_TOKEN"
   SUPABASE_URL = "YOUR_SUPABASE_URL"
   # SUPABASE_KEY removed – set via env in deployment
   REDIS_URL = "YOUR_REDIS_URL"
-  WEBHOOK_URL = "https://YOUR_DOMAIN_OR_FLY_IO_URL/webhook"
+  WEBHOOK_URL = "https://YOUR_DOMAIN_OR_FLY_IO_URL"
+  TELEGRAM_WEBHOOK_PATH = "/telegram/webhook"
+  # Set BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET as deployment secrets.

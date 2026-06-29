@@ -53,22 +53,39 @@ async def _verify_face(uid: int, file_id: str) -> bool:
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8624196108:***')
+def required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+BOT_TOKEN = required_env('BOT_TOKEN')
 REDIS_URL = os.getenv('REDIS_URL', '')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://winkly-kmsz.onrender.com')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', '').rstrip('/')
 PORT = int(os.getenv('PORT', '8080'))
 ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', '0'))
-RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', 'rzp_live_T5RFsK3b9AYBTX')
-RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', 'MBAphgobB9XnZ33SylDA9r7C')
-RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', 'winkly_webhook_secret')
+TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
+TELEGRAM_WEBHOOK_PATH = os.getenv('TELEGRAM_WEBHOOK_PATH', '/telegram/webhook')
+if not TELEGRAM_WEBHOOK_PATH.startswith('/'):
+    TELEGRAM_WEBHOOK_PATH = '/' + TELEGRAM_WEBHOOK_PATH
+RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
+RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
+RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
 BOT_USERNAME = os.getenv('BOT_USERNAME', 'Winkly_dating_bot')
 
+PLAN_CATALOG = {
+    "trial_1d": {"name": "TEST 1 Day", "price": 1, "duration": 1},
+    "monthly": {"name": "Monthly", "price": 199, "duration": 30},
+    "quarterly": {"name": "3 Months", "price": 299, "duration": 90},
+    "half_year": {"name": "6 Months", "price": 499, "duration": 180},
+    "yearly": {"name": "1 Year", "price": 699, "duration": 365},
+}
 LONG_PLANS = [
-    {"name": "TEST 1 Day", "price": 1,  "duration": 1},
-    {"name": "Monthly",    "price": 199, "duration": 30},
-    {"name": "3 Months",   "price": 299, "duration": 90},
-    {"name": "6 Months",   "price": 499, "duration": 180},
-    {"name": "1 Year",      "price": 699, "duration": 365},
+    {"id": "trial_1d", **PLAN_CATALOG["trial_1d"]},
+    {"id": "monthly", **PLAN_CATALOG["monthly"]},
+    {"id": "quarterly", **PLAN_CATALOG["quarterly"]},
+    {"id": "half_year", **PLAN_CATALOG["half_year"]},
+    {"id": "yearly", **PLAN_CATALOG["yearly"]},
 ]
 
 bot = Bot(token=BOT_TOKEN)
@@ -89,7 +106,11 @@ else:
 dp = Dispatcher(bot=bot, storage=_fsm_storage)
 
 try:
-    razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+    razorpay_client = (
+        razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET
+        else None
+    )
 except Exception as e:
     logger.warning(f"Razorpay init failed: {e}")
     razorpay_client = None
@@ -158,6 +179,10 @@ async def init_storage():
                     prof['dob'] = ''
                     if "received_texts" not in prof:
                         prof["received_texts"] = 0
+                    if "verified_female" not in prof:
+                        prof["verified_female"] = False
+                    if "verification_status" not in prof:
+                        prof["verification_status"] = "not_required"
         # Persist migrated fields back to Redis immediately
     await save_all()
     raw_likes = await r.get('winkly:likes')
@@ -233,8 +258,9 @@ async def save_all():
                     'lon': data.get('lon', '') or existing.get('lon', ''),
                     'location_name': data.get('location_name', '') or existing.get('location_name', ''),
                     'photo': data.get('photo') or existing.get('photo'),
-                    'verified': data.get('verified', True) or existing.get('verified', True),
-                    'verification_status': data.get('verification_status', 'verified') or existing.get('verification_status', 'verified'),
+                    'verified': data.get('verified') if data.get('verified') is not None else existing.get('verified', False),
+                    'verified_female': data.get('verified_female') if data.get('verified_female') is not None else existing.get('verified_female', False),
+                    'verification_status': data.get('verification_status', 'not_required') or existing.get('verification_status', 'not_required'),
                     'username': username_val or existing.get('username', ''),
                     'free_texts': data.get('free_texts') if data.get('free_texts') is not None else existing.get('free_texts', FREE_TEXTS_JOINING),
                     'rejected': data.get('rejected') or existing.get('rejected', []),
@@ -261,9 +287,10 @@ premium_subscriptions: Dict[int, dict] = {}
 current_chat: Dict[int, int] = {}
 _queue_msg_ids: Dict[int, int] = {}
 _processed_payments: Set[str] = set()
-_payment_link_map: Dict[str, dict] = {}  # payment_link_id -> {'uid': int, 'duration_days': int}
+_payment_link_map: Dict[str, dict] = {}  # payment_link_id -> server-side pending payment metadata
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
 _reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
+_quota_locks: Dict[int, asyncio.Lock] = {}
 # === Bot Protection: IP Rate Limiting ===
 import time as _time
 
@@ -468,9 +495,9 @@ def is_premium(uid: int) -> bool:
     except: return False
 
 def is_verified_female(uid: int) -> bool:
-    """Verified females get unlimited free access (bypass text limits)."""
+    """Only explicit server-side female verification gets unlimited free access."""
     p = user_profiles.get(uid)
-    return bool(p and p.get('verified') and 'Female' in (p.get('gender', ''),))
+    return bool(p and p.get('gender') == 'Female' and p.get('verified_female') is True)
 
 def check_text_quota(uid: int) -> bool:
     """Check if user can send a message (free texts remaining, premium, or verified female)."""
@@ -492,6 +519,80 @@ def consume_text(uid: int):
         return
     p['free_texts'] = max(0, p.get('free_texts', 0) - 1)
 
+def _quota_lock(uid: int) -> asyncio.Lock:
+    lock = _quota_locks.get(uid)
+    if lock is None:
+        lock = asyncio.Lock()
+        _quota_locks[uid] = lock
+    return lock
+
+async def has_text_quota(uid: int) -> bool:
+    """Check quota using Redis when available so workers see the same balance."""
+    p = user_profiles.get(uid)
+    if not p:
+        return False
+    if is_premium(uid) or is_verified_female(uid):
+        return True
+    r = await get_redis()
+    if not r:
+        return p.get('free_texts', 0) > 0
+    key = f'winkly:quota:{uid}:free_texts'
+    await r.setnx(key, int(p.get('free_texts', 0)))
+    try:
+        remaining = int(await r.get(key) or 0)
+    except (TypeError, ValueError):
+        remaining = 0
+    p['free_texts'] = remaining
+    return remaining > 0
+
+async def reserve_text_quota(uid: int) -> bool:
+    """Atomically reserve one outgoing text before delivery."""
+    p = user_profiles.get(uid)
+    if not p:
+        return False
+    if is_premium(uid) or is_verified_female(uid):
+        return True
+    async with _quota_lock(uid):
+        r = await get_redis()
+        if r:
+            key = f'winkly:quota:{uid}:free_texts'
+            await r.setnx(key, int(p.get('free_texts', 0)))
+            script = """
+local current = tonumber(redis.call('get', KEYS[1]) or '0')
+if current <= 0 then
+  return -1
+end
+current = current - 1
+redis.call('set', KEYS[1], current)
+return current
+"""
+            remaining = int(await r.eval(script, 1, key))
+            if remaining < 0:
+                return False
+            p['free_texts'] = remaining
+            await save_all()
+            return True
+        remaining = int(p.get('free_texts', 0) or 0)
+        if remaining <= 0:
+            return False
+        p['free_texts'] = remaining - 1
+        await save_all()
+        return True
+
+async def refund_text_quota(uid: int):
+    p = user_profiles.get(uid)
+    if not p or is_premium(uid) or is_verified_female(uid):
+        return
+    async with _quota_lock(uid):
+        r = await get_redis()
+        if r:
+            key = f'winkly:quota:{uid}:free_texts'
+            remaining = int(await r.incr(key))
+            p['free_texts'] = remaining
+        else:
+            p['free_texts'] = int(p.get('free_texts', 0) or 0) + 1
+        await save_all()
+
 def quota_summary(uid: int) -> str:
     if is_premium(uid):
         exp_str = premium_subscriptions[uid].get('expiry_date', '')
@@ -508,19 +609,24 @@ def quota_summary(uid: int) -> str:
     return "FREE LIMIT REACHED - Upgrade for unlimited texts."
 
 def referral_code(uid: int) -> str:
-    return hashlib.md5(f"winkly_{uid}_ref".encode()).hexdigest()[:8].upper()
+    secret = BOT_TOKEN.encode()
+    return hmac.new(secret, f"winkly_ref:{uid}".encode(), hashlib.sha256).hexdigest()[:10].upper()
 
 async def referral_count(uid: int) -> int:
     try:
         r = await get_redis(); return await r.scard(f'winkly:referrals:{uid}')
     except: return 0
 
-async def award_free_premium(uid: int):
-    exp = datetime.now() + timedelta(days=1)
+async def activate_premium(uid: int, days: int) -> datetime:
+    exp = datetime.now() + timedelta(days=days)
     premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
     if uid in user_profiles:
         user_profiles[uid]['received_texts'] = 0
     await save_all()
+    return exp
+
+async def award_free_premium(uid: int):
+    await activate_premium(uid, 1)
     try:
         await bot.send_message(uid,
             "FREE PREMIUM EARNED! You unlocked 1 day of FREE unlimited texts and matches! Valid 24 hours. Enjoy!",
@@ -614,14 +720,29 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
         _reconnect_tasks.pop(a_uid, None)
 
 async def credit_referrer(ref_code: str, new_uid: int):
+    if not ref_code:
+        return False
+    ref_code = ref_code.strip().upper()
     for uid in list(user_profiles.keys()):
         if referral_code(uid) == ref_code:
-            try:
-                r = await get_redis(); await r.sadd(f'winkly:referrals:{uid}', new_uid)
-            except: pass
+            if uid == new_uid:
+                logger.info(f"Rejected self-referral for uid={new_uid}")
+                return False
+            r = await get_redis()
+            if not r:
+                logger.warning("Referral ignored because Redis is unavailable")
+                return False
+            claimed = await r.set(f'winkly:referred_by:{new_uid}', str(uid), nx=True, ex=86400 * 365)
+            if not claimed:
+                logger.info(f"Referral already claimed for uid={new_uid}")
+                return False
+            await r.sadd(f'winkly:referrals:{uid}', str(new_uid))
             cnt = await referral_count(uid)
             logger.info(f"Referrer {uid} has {cnt} referrals")
-            if cnt >= 3: await award_free_premium(uid)
+            if cnt >= 3:
+                awarded = await r.set(f'winkly:referral_awarded:{uid}:3', '1', nx=True, ex=86400 * 365)
+                if awarded:
+                    await award_free_premium(uid)
             return True
     return False
 
@@ -649,33 +770,70 @@ def find_queue_match(me: dict, my_uid: int):
     for uid in list(waiting_queue.keys()):
         if uid == my_uid: continue
         if uid not in user_profiles: continue
+        if uid in current_chat: continue
         m = find_compat(me2, {uid: user_profiles[uid]})
         if m: return {**m[0], 'wait_info': waiting_queue[uid]}
     return None
 
-def make_link_sync(uid: int, name: str, price: int, days: int):
-    if not razorpay_client: return None
+def make_link_sync(uid: int, plan_id: str):
+    plan = PLAN_CATALOG.get(plan_id)
+    if not razorpay_client or not plan:
+        return None
     try:
-        result = razorpay_client.payment_link.create({
-            "amount": price*100, "currency": "INR", "description": f"Winkly Premium - {name}",
-            "notes": {"uid": str(uid), "duration_days": str(days)},
-            "callback_url": f"{WEBHOOK_URL}/payment/success", "callback_method": "get",
+        payload = {
+            "amount": int(plan["price"]) * 100,
+            "currency": "INR",
+            "description": f"Winkly Premium - {plan['name']}",
+            "notes": {"uid": str(uid), "plan_id": plan_id},
             "options": {
                 "checkout": {
                     "name": "Winkly",
                     "description": "Premium Dating"
                 }
             },
-        })
+        }
+        if WEBHOOK_URL:
+            payload["callback_url"] = f"{WEBHOOK_URL}/payment/success"
+            payload["callback_method"] = "get"
+        result = razorpay_client.payment_link.create(payload)
         pl_id = result.get("id")
         if pl_id:
-            _payment_link_map[pl_id] = {"uid": uid, "duration_days": days}
-        return result.get("short_url")
+            _payment_link_map[pl_id] = {
+                "uid": uid,
+                "plan_id": plan_id,
+                "amount": int(plan["price"]) * 100,
+                "currency": "INR",
+                "status": "pending",
+            }
+        return {"url": result.get("short_url"), "payment_link_id": pl_id}
     except Exception as e:
         logger.error(f"Payment link error: {e}"); return None
 
-async def make_payment_link(uid: int, name: str, price: int, days: int):
-    return await asyncio.to_thread(make_link_sync, uid, name, price, days)
+async def make_payment_link(uid: int, plan_id: str):
+    plan = PLAN_CATALOG.get(plan_id)
+    if not plan:
+        logger.warning(f"Invalid premium plan requested: {plan_id}")
+        return None
+    r = await get_redis()
+    if not r:
+        logger.error("Payment link creation requires Redis pending-payment storage")
+        return None
+    result = await asyncio.to_thread(make_link_sync, uid, plan_id)
+    if not result or not result.get("url") or not result.get("payment_link_id"):
+        return None
+    link_id = result["payment_link_id"]
+    amount = int(plan["price"]) * 100
+    pending = {
+        "uid": str(uid),
+        "plan_id": plan_id,
+        "amount": str(amount),
+        "currency": "INR",
+        "status": "pending",
+    }
+    await r.hset(f'winkly:payment:{link_id}', mapping=pending)
+    await r.expire(f'winkly:payment:{link_id}', 86400)
+    _payment_link_map[link_id] = pending
+    return result["url"]
 
 async def safe_delete(chat_id: int, message_id: int):
     if message_id:
@@ -972,8 +1130,9 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
             'lon': data.get('lon', ''),
             'location_name': data.get('location_name', ''),
             'photo': data.get('photo'),
-            'verified': True,
-            'verification_status': 'verified',
+            'verified': False,
+            'verified_female': False,
+            'verification_status': 'not_required',
             'username': (data.get('username') or await fsm_backup_get(uid, 'username') or ''),
             'free_texts': FREE_TEXTS_JOINING,
             'rejected': [],
@@ -1390,10 +1549,17 @@ async def do_match(cb: types.CallbackQuery):
         await cb.message.edit_text("⚠️ No profile found. Please send /start.")
         await cb.answer()
         return
+    if uid in current_chat:
+        await cb.answer("End your current chat before finding a new match.", show_alert=True)
+        return
     me = user_profiles[uid]
     m = find_queue_match(me, uid)
     if m:
         pid = m['uid']
+        if pid in current_chat:
+            waiting_queue.pop(pid, None)
+            await cb.answer("That match is already in a chat. Please try again.", show_alert=True)
+            return
         active_matches.setdefault(uid, {})
         active_matches.setdefault(pid, {})
         active_matches[uid][pid] = {'status': 'matched'}
@@ -1471,7 +1637,13 @@ async def start_chat(cb: types.CallbackQuery, state: FSMContext):
     if uid not in active_matches or pid not in active_matches.get(uid, {}):
         await cb.answer("⚠️ You are not matched with this user.", show_alert=True)
         return
-    if not check_text_quota(uid):
+    if current_chat.get(uid) not in (None, pid):
+        await cb.answer("End your current chat first.", show_alert=True)
+        return
+    if current_chat.get(pid) not in (None, uid):
+        await cb.answer("This match is already in another chat.", show_alert=True)
+        return
+    if not await has_text_quota(uid):
         await cb.answer("⚠️ No free texts remaining. Upgrade to continue.", show_alert=True)
         return
     # Clear any stale FSM state (e.g. from an unfinished edit-profile flow)
@@ -1514,7 +1686,12 @@ async def say_hi(cb: types.CallbackQuery):
     if current_chat.get(uid) != pid:
         await cb.answer("⚠️ Not in an active chat.", show_alert=True)
         return
-    if not check_text_quota(uid):
+    if current_chat.get(pid) != uid:
+        current_chat.pop(uid, None)
+        await save_all()
+        await cb.answer("This chat is no longer active.", show_alert=True)
+        return
+    if not await reserve_text_quota(uid):
             await cb.message.edit_text(
                 "⏸️ <b>Text limit reached</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1529,9 +1706,9 @@ async def say_hi(cb: types.CallbackQuery):
     pname = user_profiles[uid]['name']
     try:
         await bot.send_message(pid, f"\U0001f44b <b>{pname}</b> said: Hi!", parse_mode='HTML')
-        consume_text(uid)
         await save_all()
     except:
+        await refund_text_quota(uid)
         pass
     try:
         await cb.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1602,7 +1779,7 @@ async def wait_reconnect(cb: types.CallbackQuery):
     a_uid = current_chat.get(b_uid)
     if a_uid:
         _cleanup_reconnect(a_uid)
-        if a_uid in current_chat and not is_premium(a_uid) and not check_text_quota(a_uid):
+        if a_uid in current_chat and not is_premium(a_uid) and not await has_text_quota(a_uid):
             _reconnect_tasks[a_uid] = asyncio.create_task(_reconnect_loop(a_uid, b_uid))
 
 
@@ -1669,7 +1846,12 @@ async def relay(message: types.Message, state: FSMContext):
     if current_state is not None:
         return
     pid = current_chat[uid]
-    if not check_text_quota(uid):
+    if current_chat.get(pid) != uid:
+        current_chat.pop(uid, None)
+        await save_all()
+        await message.answer("This chat is no longer active.")
+        return
+    if not await has_text_quota(uid):
                 base = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages. Upgrade to keep chatting or find a new match."
                 await message.answer(
                     base,
@@ -1709,9 +1891,10 @@ async def relay(message: types.Message, state: FSMContext):
             await save_all()
             return
     # Receiver can always receive messages — no quota check
+    reserved_text = False
     try:
         # If receiver has no quota, show notification instead of forwarding
-        if not check_text_quota(pid):
+        if not await has_text_quota(pid):
             pname = user_profiles[uid].get('name', 'Someone')
             n = _quota_notif.get(pid)
             count = (n['count'] + 1) if n else 1
@@ -1734,14 +1917,27 @@ async def relay(message: types.Message, state: FSMContext):
                 _quota_notif[pid] = {'mid': msg.message_id, 'count': count}
             await save_all()
             return
+        if not await reserve_text_quota(uid):
+            await message.answer(
+                "Text limit reached. Upgrade to keep chatting.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="1 Day Trial", callback_data='premium_1day'),
+                     InlineKeyboardButton(text="Plans", callback_data='premium_plans')],
+                ])
+            )
+            if uid not in _reconnect_tasks:
+                _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
+            return
+        reserved_text = True
         await bot.copy_message(pid, message.chat.id, message.message_id)
-        consume_text(uid)
         # Increment receiver's received_texts (for Male/Other without premium)
         p_recv = user_profiles.get(pid)
         if p_recv and p_recv.get('gender') in ('Male', 'Other') and not is_premium(pid):
             p_recv['received_texts'] = p_recv.get('received_texts', 0) + 1
         await save_all()
     except:
+        if reserved_text:
+            await refund_text_quota(uid)
         await message.answer("⚠️ Couldn't deliver your message.")
 
 # ─── Premium callbacks ───────────────────────────────────────────────────────
@@ -1756,7 +1952,7 @@ async def prem_1(cb: types.CallbackQuery):
         await cb.answer()
         return
     await cb.message.edit_text("\u23f3 Creating payment link...")
-    url = await make_payment_link(uid, "TEST 1 Day", 1, 1)
+    url = await make_payment_link(uid, "trial_1d")
     if not url:
         await cb.message.edit_text(
             "⚠️ Couldn't create payment link. Please try again later.",
@@ -1784,7 +1980,7 @@ async def prem_plans(cb: types.CallbackQuery):
     await mark_online(uid)
     rows = [[InlineKeyboardButton(
         text=f"\U0001f3c6 {p['name']} — Rs{p['price']} (Save {int((1 - p['price']/(49*p['duration']))*100)}%)",
-        callback_data=f"premium_select:{p['name']}:{p['price']}:{p['duration']}"
+        callback_data=f"premium_select:{p['id']}"
     )] for p in LONG_PLANS]
     rows.append([InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')])
     rows.append([InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='back_to_premium')])
@@ -1801,10 +1997,14 @@ async def prem_plans(cb: types.CallbackQuery):
 async def prem_sel(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
-    _, name, price, dur = cb.data.split(':')
-    price, dur = int(price), int(dur)
+    _, plan_id = cb.data.split(':', 1)
+    plan = PLAN_CATALOG.get(plan_id)
+    if not plan:
+        await cb.answer("Invalid plan.", show_alert=True)
+        return
+    name, price, dur = plan['name'], int(plan['price']), int(plan['duration'])
     await cb.message.edit_text(f"\u23f3 Creating payment link for <b>{name}</b>...")
-    url = await make_payment_link(uid, name, price, dur)
+    url = await make_payment_link(uid, plan_id)
     if not url:
         await cb.message.edit_text(
             "⚠️ Couldn't create payment link. Please try again later.",
@@ -2372,142 +2572,127 @@ async def check_queue_loop():
 
 async def handle_razorpay_webhook(request):
     try:
-        logger.info(f"Razorpay webhook hit: {request.headers.get('X-Razorpay-Signature', 'NO_SIG')[:20]}...")
         if not RAZORPAY_WEBHOOK_SECRET:
             return web.Response(status=400, text="Webhook secret not configured")
         sig = request.headers.get('X-Razorpay-Signature')
         if not sig:
             return web.Response(status=400, text="Missing signature")
-        body = await request.text()
-        logger.info(f"Webhook body preview: {body[:200]}")
-        expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
-        if sig != expected:
-            logger.warning(f"Webhook invalid sig: {sig[:20]}... expected {expected[:20]}...")
+        body = await request.read()
+        expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            logger.warning("Razorpay webhook invalid signature")
             return web.Response(status=400, text="Invalid signature")
-        data = json.loads(body)
+        try:
+            data = json.loads(body.decode('utf-8'))
+        except json.JSONDecodeError:
+            return web.Response(status=400, text="Invalid JSON")
+
         event = data.get('event', '')
-        notes = {}
-        payment_id = None
-        if event == 'payment_link.paid':
-            entity = data.get('payload', {}).get('payment_link', {}).get('entity', {})
-            notes = entity.get('notes', {})
-            payment_id = entity.get('id')
-        elif event == 'payment.captured':
-            entity = data.get('payload', {}).get('payment', {}).get('entity', {})
-            notes = entity.get('notes', {})
-            payment_id = entity.get('id')
-        if not notes:
-            entity = data.get('payload', {}).get('order', {}).get('entity', {})
-            notes = entity.get('notes', {})
-        uid_s = notes.get('uid')
-        dur_s = notes.get('duration_days')
-        if uid_s and dur_s and payment_id:
-            if payment_id in _processed_payments:
-                return web.Response(status=200, text="Already processed")
-            uid = int(uid_s)
-            dur = int(dur_s)
-            exp = datetime.now() + timedelta(days=dur)
-            premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
-            if uid in user_profiles:
-                user_profiles[uid]['received_texts'] = 0
-            _processed_payments.add(payment_id)
-            r = await get_redis()
-            if r:
-                try:
-                    await r.set('winkly:premium', json.dumps(premium_subscriptions))
-                    await r.set('winkly:processed', json.dumps(list(_processed_payments)))
-                except Exception as e:
-                    logger.warning(f"Webhook Redis save failed: {e}")
-            logger.info(f"Premium activated for {uid}, plan={dur}d, until {exp}")
-            try:
-                msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
-                if uid in current_chat:
-                    msg += "\n\n\U0001f4ac Continue chatting with your match!"
-                    await bot.send_message(uid, msg, parse_mode='HTML')
-                else:
-                    await bot.send_message(
-                        uid, msg,
-                        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
-                        ])
-                    )
-            except:
-                pass
-        else:
-            logger.info(f"Webhook {event} missing uid/duration: {notes}")
+        payload = data.get('payload', {})
+        payment_link = payload.get('payment_link', {}).get('entity', {}) or {}
+        payment = payload.get('payment', {}).get('entity', {}) or {}
+
+        link_id = payment_link.get('id') or payment.get('payment_link_id')
+        payment_id = payment.get('id') or f"{event}:{link_id}"
+        if not link_id:
+            logger.info(f"Ignoring Razorpay event without payment_link id: {event}")
+            return web.Response(status=200, text="Ignored")
+
+        link_status = str(payment_link.get('status', '')).lower()
+        payment_status = str(payment.get('status', '')).lower()
+        status_ok = (
+            (event == 'payment_link.paid' and link_status == 'paid') or
+            (event == 'payment.captured' and payment_status == 'captured')
+        )
+        if not status_ok:
+            logger.info(f"Ignoring Razorpay event with non-paid status: event={event}")
+            return web.Response(status=200, text="Ignored")
+
+        r = await get_redis()
+        if not r:
+            logger.error("Razorpay webhook cannot validate pending payment without Redis")
+            return web.Response(status=503, text="Payment store unavailable")
+
+        pending_key = f'winkly:payment:{link_id}'
+        pending = await r.hgetall(pending_key)
+        if not pending:
+            logger.warning(f"Razorpay webhook for unknown payment link: {link_id}")
+            return web.Response(status=400, text="Unknown payment link")
+
+        plan_id = pending.get('plan_id')
+        plan = PLAN_CATALOG.get(plan_id)
+        if not plan:
+            logger.warning(f"Razorpay webhook pending payment has invalid plan: {plan_id}")
+            return web.Response(status=400, text="Invalid pending payment")
+
+        expected_amount = int(pending.get('amount', '0'))
+        amount = int(payment.get('amount') or payment_link.get('amount_paid') or payment_link.get('amount') or 0)
+        currency = payment.get('currency') or payment_link.get('currency')
+        if amount != expected_amount or currency != pending.get('currency'):
+            logger.warning(
+                f"Razorpay amount/currency mismatch for {link_id}: got {amount} {currency}, expected {expected_amount} {pending.get('currency')}"
+            )
+            return web.Response(status=400, text="Payment mismatch")
+
+        notes = payment_link.get('notes') or payment.get('notes') or {}
+        if notes:
+            if str(notes.get('uid', pending.get('uid'))) != pending.get('uid'):
+                return web.Response(status=400, text="UID mismatch")
+            if str(notes.get('plan_id', plan_id)) != plan_id:
+                return web.Response(status=400, text="Plan mismatch")
+
+        processed_key = f'winkly:processed_payment:{payment_id}'
+        claimed = await r.set(processed_key, '1', nx=True, ex=86400 * 365)
+        if not claimed:
+            return web.Response(status=200, text="Already processed")
+
+        uid = int(pending['uid'])
+        dur = int(plan['duration'])
+        exp = await activate_premium(uid, dur)
+        _processed_payments.add(payment_id)
+        await r.hset(pending_key, mapping={
+            'status': 'paid',
+            'payment_id': str(payment_id),
+            'paid_at': datetime.now().isoformat(),
+        })
+        await r.expire(pending_key, 86400 * 30)
+        logger.info(f"Premium activated for uid={uid}, plan_id={plan_id}, until={exp.isoformat()}")
+        try:
+            msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
+            if uid in current_chat:
+                msg += "\n\n\U0001f4ac Continue chatting with your match!"
+                await bot.send_message(uid, msg, parse_mode='HTML')
+            else:
+                await bot.send_message(
+                    uid, msg,
+                    parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
+                    ])
+                )
+        except Exception as e:
+            logger.warning(f"Premium activation message failed for uid={uid}: {e}")
         return web.Response(status=200, text="OK")
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return web.Response(status=500, text=str(e))
 
 async def payment_success_page(request):
-    logger.info(f"Payment success page hit: {dict(request.query)}")
-    plink_id = request.query.get('razorpay_payment_link_id')
-    payment_id = request.query.get('razorpay_payment_id')
-    uid = dur = None
-    # Use Razorpay payments API to verify status (authoritative)
-    if payment_id and razorpay_client:
-        try:
-            p = razorpay_client.payments.fetch(payment_id)
-            if p.get('status') == 'captured':
-                notes = p.get('notes', {})
-                uid_s = notes.get('uid')
-                dur_s = notes.get('duration_days')
-                if uid_s and dur_s:
-                    uid = int(uid_s); dur = int(dur_s)
-        except Exception as e:
-            logger.warning(f"Payment fetch error: {e}")
-    # Fallback: check our local map
-    if not uid and plink_id and plink_id not in _processed_payments:
-        info = _payment_link_map.get(plink_id)
-        if info:
-            uid = info['uid']; dur = info['duration_days']
-    if uid and dur and plink_id not in _processed_payments:
-        # Fast path: look up in our local map (no API call needed)
-        info = _payment_link_map.get(plink_id)
-        if info:
-            uid = info['uid']
-            dur = info['duration_days']
-        elif payment_id and razorpay_client:
-            # Slow path: fetch payment link details from Razorpay API
-            try:
-                p = razorpay_client.payment_link.fetch(plink_id)
-                notes = p.get('notes', {})
-                uid_s = notes.get('uid')
-                dur_s = notes.get('duration_days')
-                if uid_s and dur_s:
-                    uid = int(uid_s)
-                    dur = int(dur_s)
-            except Exception as e:
-                logger.warning(f"Payment link fetch failed: {e}")
-        if uid and dur:
-            exp = datetime.now() + timedelta(days=dur)
-            premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
-            if uid in user_profiles:
-                user_profiles[uid]['received_texts'] = 0
-            _processed_payments.add(plink_id)
-            await save_all()
-            logger.info(f"Premium activated via success page for {uid}, plan={dur}d")
-            try:
-                msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
-                if uid in current_chat:
-                    msg += "\n\n\U0001f4ac Continue chatting with your match!"
-                    await bot.send_message(uid, msg, parse_mode='HTML')
-                else:
-                    await bot.send_message(uid, msg,
-                        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="\u2764\ufe0f  Find Matches", callback_data='do_match')],
-                        ]))
-            except:
-                pass
+    logger.info(
+        "Payment success callback hit: link_present=%s payment_present=%s",
+        bool(request.query.get('razorpay_payment_link_id')),
+        bool(request.query.get('razorpay_payment_id')),
+    )
     return web.Response(
         content_type='text/html',
-        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Successful - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Successful!</h1><p>Your Winkly premium subscription is now active.</p><p>Return to Telegram to start matching.</p>        <a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Received - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Received</h1><p>Your payment is being verified by Razorpay.</p><p>Premium activates in Telegram after webhook confirmation.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
     )
 
 async def auto_setup_webhook():
     if not razorpay_client:
         logger.info("Razorpay unavailable - skipping webhook setup")
+        return
+    if not WEBHOOK_URL or not RAZORPAY_WEBHOOK_SECRET:
+        logger.info("Razorpay webhook setup skipped: WEBHOOK_URL or RAZORPAY_WEBHOOK_SECRET missing")
         return
     try:
         existing = await asyncio.to_thread(lambda: razorpay_client.webhook.all())
@@ -2602,12 +2787,14 @@ stop.onclick=()=>{if(stream){stream.getTracks().forEach(t=>t.stop());stream=null
 
 
 async def handle_selfie_page(request):
+    return web.Response(status=410, text='Selfie verification disabled')
     uid = request.query.get('uid', '')
     page = SELFIE_PAGE.replace('{uid}', uid)
     return web.Response(text=page, content_type='text/html')
 
 
 async def handle_upload_selfie(request):
+    return web.Response(status=410, text='Selfie verification disabled')
     try:
         data = await request.post()
         uid_str = data.get('uid', '')
@@ -2665,20 +2852,6 @@ async def handle_upload_selfie(request):
 
 
 # ─── DEV: Direct premium activation for testing (remove in production) ───────
-@dp.message(Command('premium_activate'))
-async def cmd_activate_premium(message: types.Message):
-    uid = message.from_user.id
-    if uid != ADMIN_CHAT_ID and uid != 8624196108:  # allow self-testing
-        return
-    days = 365
-    exp = datetime.now() + timedelta(days=days)
-    premium_subscriptions[uid] = {'expiry_date': exp.isoformat()}
-    if uid in user_profiles:
-        user_profiles[uid]['received_texts'] = 0
-    await save_all()
-    await message.answer(f"\U0001f389 <b>PREMIUM ACTIVATED!</b>\n\nValid for {days} days.\n\n\u2705 Unlimited texts and matches!",
-        parse_mode='HTML', reply_markup=main_kb(uid))
-
 # ─── Startup ───────────────────────────────────────────────────────────────
 
 async def on_startup(dispatcher: Dispatcher):
@@ -2701,22 +2874,25 @@ async def on_startup(dispatcher: Dispatcher):
 
     await init_storage()
     logger.info(f"Loaded {len(user_profiles)} profiles, {len(active_matches)} matches")
-    # Log FSM state of admin user to verify storage is working
-    r_check = await get_redis()
-    if r_check:
-        test_key = f"fsm:{ADMIN_CHAT_ID}:{ADMIN_CHAT_ID}:data"
-        test_val = await r_check.get(test_key)
-        logger.info(f"FSM test after init: uid={ADMIN_CHAT_ID} key={test_key} val={test_val}")
 
     if WEBHOOK_URL:
-        await bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
+        if not TELEGRAM_WEBHOOK_SECRET:
+            raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is required when WEBHOOK_URL is set")
+        webhook_target = WEBHOOK_URL
+        if not webhook_target.endswith(TELEGRAM_WEBHOOK_PATH):
+            webhook_target = f"{WEBHOOK_URL}{TELEGRAM_WEBHOOK_PATH}"
+        await bot.set_webhook(webhook_target, secret_token=TELEGRAM_WEBHOOK_SECRET)
+        logger.info(f"Webhook set to {webhook_target}")
         await auto_setup_webhook()
 
         from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 
-        handler = SimpleRequestHandler(dispatcher=dispatcher, bot=bot)
-        app = web.Application()
+        handler = SimpleRequestHandler(
+            dispatcher=dispatcher,
+            bot=bot,
+            secret_token=TELEGRAM_WEBHOOK_SECRET,
+        )
+        app = web.Application(client_max_size=2 * 1024 * 1024)
 
         async def health(request):
             return web.Response(text='OK', status=200)
@@ -2744,7 +2920,6 @@ async def on_startup(dispatcher: Dispatcher):
                 'REDIS_URL_present': bool(REDIS_URL),
                 'REDIS_URL_prefix': REDIS_URL[:20] + '...' if REDIS_URL else 'EMPTY',
             })
-        app.router.add_get('/debug', debug)
 
         async def fsm_check(request):
             # Read all FSM keys from Redis to diagnose state
@@ -2769,7 +2944,6 @@ async def on_startup(dispatcher: Dispatcher):
                 'storage_type': storage_type,
                 'redis_url_set': bool(REDIS_URL),
             })
-        app.router.add_get('/fsm-check', fsm_check)
 
         async def fsm_read(request):
             # Read FSM data for a specific user using aiogram's FSM context
@@ -2779,10 +2953,8 @@ async def on_startup(dispatcher: Dispatcher):
             data = await ctx.get_data()
             state = await ctx.get_state()
             return web.json_response({'uid': uid, 'state': state, 'data': data})
-        app.router.add_get('/fsm-read', fsm_read)
         async def test_route(request):
             return web.json_response({'test': 'ok', 'path': str(request.path)})
-        app.router.add_get('/test-ok', test_route)
 
         async def test_fsm_backup_endpoint(request):
             '''Test direct Redis access'''
@@ -2797,7 +2969,6 @@ async def on_startup(dispatcher: Dispatcher):
             result = await r.get(f'winkly:fsm:{uid}:test_key')
             return web.json_response({'set': test_val, 'got': result})
 
-        app.router.add_get('/test-fsm-backup', test_fsm_backup_endpoint)
 
         async def test_save(request):
             # Read FSM data and save directly (not relying on user_profiles in this worker)
@@ -2816,8 +2987,9 @@ async def on_startup(dispatcher: Dispatcher):
                 'lon': data.get('lon', ''),
                 'location_name': data.get('location_name', ''),
                 'photo': data.get('photo'),
-                'verified': True,
-                'verification_status': 'verified',
+                'verified': False,
+                'verified_female': False,
+                'verification_status': 'not_required',
                 'username': data.get('username', ''),
                 'free_texts': FREE_TEXTS_JOINING,
                 'rejected': [],
@@ -2852,8 +3024,9 @@ async def on_startup(dispatcher: Dispatcher):
                 'lon': data.get('lon', ''),
                 'location_name': data.get('location_name', ''),
                 'photo': data.get('photo'),
-                'verified': True,
-                'verification_status': 'verified',
+                'verified': False,
+                'verified_female': False,
+                'verification_status': 'not_required',
                 'username': data.get('username', ''),
                 'free_texts': FREE_TEXTS_JOINING,
                 'rejected': [],
@@ -2864,14 +3037,9 @@ async def on_startup(dispatcher: Dispatcher):
             r2 = await get_redis()
             profiles_val = await r2.get('winkly:profiles') if r2 else None
             return web.json_response({'data': data, 'prof': prof, 'saved': profiles_val})
-        app.router.add_get('/force-finish', force_finish)
-        app.router.add_post('/force-finish', force_finish)
-
         app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
         app.router.add_get('/payment/success', payment_success_page)
-        app.router.add_get('/selfie', handle_selfie_page)
-        app.router.add_post('/api/upload_selfie', handle_upload_selfie)
-        handler.register(app, path='/')
+        handler.register(app, path=TELEGRAM_WEBHOOK_PATH)
 
         runner = web.AppRunner(app)
         await runner.setup()

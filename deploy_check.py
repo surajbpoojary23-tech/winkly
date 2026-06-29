@@ -1,78 +1,94 @@
 #!/usr/bin/env python3
-"""
-Render deployment check script for Winkly Telegram bot.
-This script verifies the deployment configuration before starting the bot.
-"""
+"""Deployment configuration check for the Winkly Telegram bot."""
 
 import os
 import sys
+from urllib.parse import urlparse
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def check_environment():
-    """Check if required environment variables are set."""
-    required_vars = ['BOT_TOKEN']
-    missing_vars = []
-    
-    for var in required_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-    
-    if missing_vars:
-        print(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
+
+def _present(name: str) -> bool:
+    value = os.getenv(name)
+    return bool(value and value.strip())
+
+
+def check_required_environment() -> bool:
+    required_vars = [
+        'BOT_TOKEN',
+        'REDIS_URL',
+        'RAZORPAY_KEY_ID',
+        'RAZORPAY_KEY_SECRET',
+        'RAZORPAY_WEBHOOK_SECRET',
+    ]
+    if _present('WEBHOOK_URL'):
+        required_vars.extend(['TELEGRAM_WEBHOOK_SECRET', 'TELEGRAM_WEBHOOK_PATH'])
+
+    missing = [name for name in required_vars if not _present(name)]
+    if missing:
+        print(f"FAIL missing required environment variables: {', '.join(missing)}")
         return False
-    
-    print("✅ All required environment variables are set")
+
+    print("OK required environment variables are set")
     return True
 
-def check_port_binding():
-    """Check if the bot will bind to the correct port."""
+
+def check_port_binding() -> bool:
     port = os.getenv('PORT', '8080')
     try:
         port_num = int(port)
-        if 1 <= port_num <= 65535:
-            print(f"✅ Port {port} is valid")
-            return True
-        else:
-            print(f"❌ Port {port} is out of valid range (1-65535)")
-            return False
     except ValueError:
-        print(f"❌ Port '{port}' is not a valid number")
+        print(f"FAIL PORT is not a number: {port}")
         return False
 
-def check_webhook_config():
-    """Check webhook configuration."""
-    webhook_url = os.getenv('WEBHOOK_URL')
-    if webhook_url:
-        print(f"✅ Webhook URL is configured: {webhook_url}")
+    if 1 <= port_num <= 65535:
+        print(f"OK PORT is valid: {port_num}")
         return True
-    else:
-        print("⚠️  WEBHOOK_URL not set - bot will use long-polling mode (may cause conflicts)")
+
+    print(f"FAIL PORT is out of range: {port_num}")
+    return False
+
+
+def check_webhook_config() -> bool:
+    webhook_url = os.getenv('WEBHOOK_URL', '').strip()
+    if not webhook_url:
+        print("OK WEBHOOK_URL not set; bot will use long polling")
+        return True
+
+    parsed = urlparse(webhook_url)
+    if parsed.scheme != 'https' or not parsed.netloc:
+        print("FAIL WEBHOOK_URL must be a public HTTPS URL")
         return False
 
-def main():
-    print("=== Winkly Bot Deployment Check ===\n")
-    
+    secret = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
+    if len(secret) < 32:
+        print("FAIL TELEGRAM_WEBHOOK_SECRET must be at least 32 characters")
+        return False
+
+    print("OK webhook configuration is valid")
+    return True
+
+
+def main() -> int:
+    print("=== Winkly Bot Deployment Check ===")
     checks = [
-        ("Environment Variables", check_environment),
-        ("Port Binding", check_port_binding),
-        ("Webhook Configuration", check_webhook_config),
+        check_required_environment,
+        check_port_binding,
+        check_webhook_config,
     ]
-    
-    all_passed = True
-    for check_name, check_func in checks:
-        print(f"\n📋 Checking {check_name}...")
-        if not check_func():
-            all_passed = False
-    
-    print("\n=== Summary ===")
-    if all_passed:
-        print("✅ All checks passed!")
-        sys.exit(0)
-    else:
-        print("❌ Some checks failed. Please fix the issues above.")
-        sys.exit(1)
+    ok = True
+    for check in checks:
+        ok = check() and ok
+
+    if ok:
+        print("PASS deployment checks passed")
+        return 0
+
+    print("FAIL deployment checks failed")
+    return 1
+
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
