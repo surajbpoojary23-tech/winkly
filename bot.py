@@ -914,8 +914,8 @@ def profile_text(p: dict) -> str:
         if dob:
             age_str = f" | {calc_age(dob)}"
     return (f"👤 <b>Your Profile</b>\n\n"
-            f"Name: {p.get('name','?')}\n"
-            f"Gender: {p.get('gender','?')} | Interested in: {p.get('preferred_gender','?')}{age_str}\n"
+            f"Name: {p.get('name','?')} | Age: {age_str.lstrip(' | ')}\n"
+            f"Gender: {p.get('gender','?')} | Interested in: {p.get('preferred_gender','?')}\n"
             f"Bio: {bio}\n"
             f"Location: {loc}{vb}")
 
