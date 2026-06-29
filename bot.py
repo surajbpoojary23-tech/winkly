@@ -1495,6 +1495,8 @@ async def say_hi(cb: types.CallbackQuery):
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
+            if uid not in _reconnect_tasks:
+                _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
             await cb.answer()
             return
     pname = user_profiles[uid]['name']
