@@ -956,7 +956,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "Hey there! 👋\n\n"
         "I'm <b>Winkly</b> — your wingman on Telegram.\n\n"
-        "<b>What should people call you?</b>",
+        "<b>What should we call you?</b>",
         parse_mode='HTML'
     )
     await state.update_data(last_bot_msg=msg.message_id)
