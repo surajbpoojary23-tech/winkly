@@ -678,8 +678,8 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
             pname = user_profiles.get(a_uid, {}).get('name', 'Someone')
             await bot.send_message(
                 b_uid,
-                f"⏳ <b>{pname}</b> reached the message limit.\n\n"
-                f"They can still receive your messages. We'll let you know when they're back!",
+                f"⏳ <b>{pname}</b> is on hold.\n\n"
+                f"They can still receive your messages. We'll notify you when they reconnect.",
                 parse_mode='HTML'
             )
         except:
@@ -2678,9 +2678,50 @@ async def payment_success_page(request):
         bool(request.query.get('razorpay_payment_link_id')),
         bool(request.query.get('razorpay_payment_id')),
     )
+    link_id = request.query.get('razorpay_payment_link_id')
+    payment_id = request.query.get('razorpay_payment_id')
+    uid = None
+    activated = False
+
+    if link_id:
+        # Look up pending payment from in-memory map or Redis
+        pending = _payment_link_map.get(link_id)
+        if not pending:
+            r = await get_redis()
+            if r:
+                try:
+                    data = await r.hgetall(f'winkly:payment:{link_id}')
+                    if data:
+                        pending = data
+                except:
+                    pass
+        if pending:
+            try:
+                uid = int(pending.get('uid', 0))
+                plan_id = pending.get('plan_id', '')
+                plan = PLAN_CATALOG.get(plan_id)
+                if uid and plan:
+                    dur = int(plan['duration'])
+                    await activate_premium(uid, dur)
+                    _processed_payments.add(payment_id or link_id)
+                    activated = True
+                    try:
+                        await bot.send_message(
+                            uid,
+                            "🌟 <b>Premium Activated!</b>\n\n"
+                            f"Your {plan['name']} plan is now active. "
+                            "Unlimited texts and matches unlocked! Go find your match. 🔥",
+                            parse_mode='HTML'
+                        )
+                    except:
+                        pass
+                    logger.info(f"Payment success page activated premium for uid={uid}, plan={plan_id}")
+            except Exception as e:
+                logger.error(f"Payment success page activation error: {e}")
+
     return web.Response(
         content_type='text/html',
-        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Received - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Received</h1><p>Your payment is being verified by Razorpay.</p><p>Premium activates in Telegram after webhook confirmation.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{"Premium Activated - Winkly" if activated else "Payment Received - Winkly"}</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">{"&#9989;" if activated else "&#9989;"}</div><h1>{"Premium Activated! 🎉" if activated else "Payment Received"}</h1><p>{"Your premium is active. Open Telegram and start chatting!" if activated else "Your payment is being verified. Premium will activate shortly."}</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
     )
 
 async def auto_setup_webhook():
