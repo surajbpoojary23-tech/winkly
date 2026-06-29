@@ -1072,6 +1072,7 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     await fsm_backup_set(uid, 'lon', str(loc.longitude))
     await fsm_backup_set(uid, 'location_name', 'GPS')
     await state.set_state(Signup.bio)
+    await message.answer("📍 Got it!", reply_markup=ReplyKeyboardRemove())
     msg = await message.answer(
         "<b>Almost done!</b>\n\n"
         "📝 <b>Write a short bio</b> — or skip for now.\n\n"
@@ -1111,7 +1112,7 @@ async def h_loc_text(message: types.Message, state: FSMContext):
         user_profiles[uid] = prof
         await save_all()
         await state.clear()
-        await message.answer("✅ Location updated!")
+        await message.answer("✅ Location updated!", reply_markup=ReplyKeyboardRemove())
         return
 
     await state.update_data(lat=str(lat), lon=str(lon), location_name=text)
@@ -1119,6 +1120,7 @@ async def h_loc_text(message: types.Message, state: FSMContext):
     await fsm_backup_set(uid, 'lon', str(lon))
     await fsm_backup_set(uid, 'location_name', text)
     await state.set_state(Signup.bio)
+    await message.answer("📍 Saved!", reply_markup=ReplyKeyboardRemove())
     msg = await message.answer(
         "<b>Almost done!</b>\n\n"
         "📝 <b>Write a short bio</b> — or skip for now.\n\n"
@@ -2256,6 +2258,10 @@ async def cb_loc_share_gps(cb: types.CallbackQuery, state: FSMContext):
 async def cb_loc_enter_text(cb: types.CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     await mark_online(uid)
+    d = await state.get_data()
+    gps_msg_id = d.get('gps_msg_id')
+    if gps_msg_id:
+        await safe_delete(cb.message.chat.id, gps_msg_id)
     await state.set_state(Signup.location)
     await cb.message.edit_text(
         "\U0001f4cd <b>Type a city or area name</b> (e.g. HSR Layout, Bangalore):",
@@ -2263,6 +2269,7 @@ async def cb_loc_enter_text(cb: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
         ])
     )
+    await cb.message.answer("⌨️", reply_markup=ReplyKeyboardRemove())
     await cb.answer()
 
 
@@ -2337,6 +2344,10 @@ async def cb_loc_enter_text_edit(cb: types.CallbackQuery, state: FSMContext):
     if await _guard_edit(state):
         await cb.answer("⚠️ Finish signup first!", show_alert=True)
         return
+    d = await state.get_data()
+    gps_msg_id = d.get('gps_msg_id')
+    if gps_msg_id:
+        await safe_delete(cb.message.chat.id, gps_msg_id)
     await state.set_state(EditProfile.location)
     await cb.message.edit_text(
         "\U0001f4cd <b>Type a city or area name</b> (e.g. HSR Layout, Bangalore):",
@@ -2345,6 +2356,7 @@ async def cb_loc_enter_text_edit(cb: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="\u00ab  Back", callback_data='edit_profile')],
         ])
     )
+    await cb.message.answer("⌨️", reply_markup=ReplyKeyboardRemove())
     await cb.answer()
 # EditProfile handlers
 @dp.message(StateFilter(EditProfile.name))
