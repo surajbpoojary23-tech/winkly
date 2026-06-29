@@ -2443,7 +2443,8 @@ async def edit_location_h(message: types.Message, state: FSMContext):
     user_profiles[uid]['location_name'] = 'GPS' if message.location else text
     await save_all()
     await state.clear()
-    await message.answer("✅ Location updated!", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await message.answer("✅ Location updated!", reply_markup=ReplyKeyboardRemove())
+    await message.answer("\U0001f464 <b>Profile</b>", parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 View Profile", callback_data='back_to_profile')],
     ]))
 
