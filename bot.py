@@ -167,19 +167,20 @@ async def init_storage():
         _processed_payments.update(json.loads(raw_proc))
     logger.info(f"Storage loaded: {len(user_profiles)} profiles, {len(active_matches)} matches, {len(waiting_queue)} queue")
 
-    # ── FSM backup: write critical fields directly to Redis as fallback ──
-    # aiogram's RedisStorage can silently fail if the Redis client has DNS issues on some
-    # Render workers. These helpers ensure name/preferred survive by bypassing FSM.
-    async def fsm_backup_set(uid: int, field: str, value: str):
-        r = await get_redis()
-        if r:
-            await r.set(f'winkly:fsm:{uid}:{field}', value, ex=86400*7)
+    # ── FSM backup functions moved to module level ──
 
-    async def fsm_backup_get(uid: int, field: str) -> str:
-        r = await get_redis()
-        if r:
-            return await r.get(f'winkly:fsm:{uid}:{field}')
-        return None
+# ── FSM backup: write critical fields directly to Redis as fallback ──
+async def fsm_backup_set(uid: int, field: str, value: str):
+    r = await get_redis()
+    if r:
+        await r.set(f'winkly:fsm:{uid}:{field}', value, ex=86400*7)
+
+async def fsm_backup_get(uid: int, field: str) -> str:
+    r = await get_redis()
+    if r:
+        return await r.get(f'winkly:fsm:{uid}:{field}')
+    return None
+
 async def save_all():
     r = await get_redis()
     if r is None:
@@ -2723,6 +2724,8 @@ async def on_startup(dispatcher: Dispatcher):
             await r.set(f'winkly:fsm:{uid}:test_key', test_val, ex=86400*7)
             result = await r.get(f'winkly:fsm:{uid}:test_key')
             return web.json_response({'set': test_val, 'got': result})
+
+        app.router.add_get('/test-fsm-backup', test_fsm_backup_endpoint)
 
         async def test_save(request):
             # Read FSM data and save directly (not relying on user_profiles in this worker)
