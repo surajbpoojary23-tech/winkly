@@ -964,10 +964,10 @@ async def reconcile_paid_payment_link(link_id: str):
     if r:
         claimed = await r.set(processed_keys[0], '1', nx=True, ex=86400 * 365)
         if not claimed:
-            return {"activated": False, "reason": "already_processed"}
+            return {"activated": True, "reason": "already_processed"}
         await r.set(processed_keys[1], '1', ex=86400 * 365)
     elif payment_id in _processed_payments:
-        return {"activated": False, "reason": "already_processed"}
+        return {"activated": True, "reason": "already_processed"}
 
     uid = int(pending["uid"])
     dur = int(plan["duration"])
