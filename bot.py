@@ -2734,6 +2734,11 @@ async def payment_success_page(request):
         bool(request.query.get('razorpay_payment_link_id')),
         bool(request.query.get('razorpay_payment_id')),
     )
+    return web.Response(
+        content_type='text/html',
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Received - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Received</h1><p>Your payment is being verified by Razorpay.</p><p>Premium activates in Telegram after webhook confirmation.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
+    )
+
     link_id = request.query.get('razorpay_payment_link_id')
     payment_id = request.query.get('razorpay_payment_id')
     uid = None
@@ -2758,20 +2763,7 @@ async def payment_success_page(request):
                 plan = PLAN_CATALOG.get(plan_id)
                 if uid and plan:
                     dur = int(plan['duration'])
-                    await activate_premium(uid, dur)
-                    _processed_payments.add(payment_id or link_id)
-                    activated = True
-                    try:
-                        await bot.send_message(
-                            uid,
-                            "🌟 <b>Premium Activated!</b>\n\n"
-                            f"Your {plan['name']} plan is now active. "
-                            "Unlimited texts and matches unlocked! Go find your match. 🔥",
-                            parse_mode='HTML'
-                        )
-                    except:
-                        pass
-                    logger.info(f"Payment success page activated premium for uid={uid}, plan={plan_id}")
+                    pass
             except Exception as e:
                 logger.error(f"Payment success page activation error: {e}")
 
@@ -2869,8 +2861,6 @@ async def on_startup(dispatcher: Dispatcher):
                     status['test_link'] = 'failed'
                     status['test_error'] = str(e)
             return web.json_response(status)
-        app.router.add_get('/razorpay-status', razorpay_status)
-
         async def debug(request):
             r = await get_redis()
             if r:
