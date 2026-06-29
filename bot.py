@@ -1156,7 +1156,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
             'location_name': data.get('location_name', ''),
             'photo': data.get('photo'),
             'verified': False,
-            'verified_female': False,
+            'verified_female': data.get('gender') == 'Female',
             'verification_status': 'not_required',
             'username': (data.get('username') or await fsm_backup_get(uid, 'username') or ''),
             'free_texts': FREE_TEXTS_JOINING,
