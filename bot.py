@@ -1243,6 +1243,7 @@ def dob_picker_kb(page: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+@dp.message(StateFilter(Signup.dob))
 async def h_dob(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
