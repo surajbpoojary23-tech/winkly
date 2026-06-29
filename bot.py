@@ -542,15 +542,17 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
     """
     Background loop: 18 checks x 10s = 3 minutes.
     Checks if the hold user (a_uid) becomes premium.
-    If found → notify partner (b_uid) "reconnected".
+    If found → notify both users chat is active again.
     If all 18 fail → notify partner with Wait/End Chat options.
     """
     try:
         # Notify partner once when loop starts
         try:
+            pname = user_profiles.get(a_uid, {}).get('name', 'Someone')
             await bot.send_message(
                 b_uid,
-                "\u23f3 User account on hold. Trying to reconnect...",
+                f"⏳ <b>{pname}</b> reached the message limit.\n\n"
+                f"They can still receive your messages. We'll let you know when they're back!",
                 parse_mode='HTML'
             )
         except:
@@ -564,12 +566,27 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
             if a_uid not in user_profiles:
                 return
             if is_premium(a_uid):
-                # Reconnected!
+                # Reconnected — notify BOTH sides
+                pname = user_profiles.get(a_uid, {}).get('name', 'Someone')
+                bname = user_profiles.get(b_uid, {}).get('name', 'Someone')
                 try:
                     await bot.send_message(
                         b_uid,
-                        "\u2705 Your match reconnected! Chat resumed.",
+                        f"🎉 <b>{pname}</b> is back!\n\n"
+                        f"Your conversation is active again. Say something nice! 💬",
                         parse_mode='HTML'
+                    )
+                except:
+                    pass
+                try:
+                    await bot.send_message(
+                        a_uid,
+                        f"✅ You're back in the chat with <b>{bname}</b>!\n\n"
+                        f"Your premium is active — keep the conversation going.",
+                        parse_mode='HTML',
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="💬 Resume Chat", callback_data=f'chat:{b_uid}')],
+                        ])
                     )
                 except:
                     pass
@@ -577,14 +594,16 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
 
         # All 18 attempts failed → notify partner with options
         if a_uid in current_chat and b_uid in current_chat:
+            pname = user_profiles.get(a_uid, {}).get('name', 'Someone')
             try:
                 await bot.send_message(
                     b_uid,
-                    "user not connected yet, do you like to wait or end chat and start matching?",
+                    f"⏳ <b>{pname}</b> hasn't reconnected yet.\n\n"
+                    f"What would you like to do?",
                     parse_mode='HTML',
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\u23f3 Wait", callback_data='wait_reconnect'),
-                         InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_reconnect')],
+                        [InlineKeyboardButton(text="⏳ Keep Waiting", callback_data='wait_reconnect'),
+                         InlineKeyboardButton(text="🔚 End Chat", callback_data='end_reconnect')],
                     ])
                 )
             except:
@@ -665,27 +684,27 @@ async def safe_delete(chat_id: int, message_id: int):
 
 def main_kb(uid: int = None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="EDIT PROFILE", callback_data='edit_profile')],
-        [InlineKeyboardButton(text="FIND MATCHES", callback_data='do_match')],
+        [InlineKeyboardButton(text="✏️ Edit Profile", callback_data='edit_profile')],
+        [InlineKeyboardButton(text="🔍 Find Matches", callback_data='do_match')],
     ])
 
 def reengage_kb(uid: int = None):
     is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
     rows = [
-        [InlineKeyboardButton(text="FIND NEW MATCH", callback_data='do_match'),
-         InlineKeyboardButton(text="MY PROFILE", callback_data='back_to_profile')],
+        [InlineKeyboardButton(text="🔍 Find New Match", callback_data='do_match'),
+         InlineKeyboardButton(text="👤 My Profile", callback_data='back_to_profile')],
     ]
     if not is_female:
-        rows.append([InlineKeyboardButton(text="PREMIUM", callback_data='see_premium')])
+        rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def edit_profile_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="EDIT NAME", callback_data='edit_name'),
-         InlineKeyboardButton(text="EDIT BIO", callback_data='edit_bio')],
-        [InlineKeyboardButton(text="EDIT PREFERRED", callback_data='edit_preferred')],
-        [InlineKeyboardButton(text="EDIT LOCATION", callback_data='edit_location')],
-        [InlineKeyboardButton(text="BACK", callback_data='back_to_profile')],
+        [InlineKeyboardButton(text="✏️ Change Name", callback_data='edit_name'),
+         InlineKeyboardButton(text="📝 Edit Bio", callback_data='edit_bio')],
+        [InlineKeyboardButton(text="👥 Change Preference", callback_data='edit_preferred')],
+        [InlineKeyboardButton(text="📍 Update Location", callback_data='edit_location')],
+        [InlineKeyboardButton(text="← Back", callback_data='back_to_profile')],
     ])
 
 def profile_text(p: dict) -> str:
@@ -702,15 +721,18 @@ def profile_text(p: dict) -> str:
             loc = 'NO LOCATION'
     else:
         loc = 'NO LOCATION'
-    bio = p.get('bio') or 'NONE'
+    bio = p.get('bio') or '—'
     age_str = ""
     dob_raw = p.get('dob')
     if dob_raw:
         dob = parse_dob(dob_raw)
         if dob:
-            age_str = f" | Age: {calc_age(dob)}"
-    return (f"YOUR PROFILE:\nName: {p.get('name','?')}\nGender: {p.get('gender','?')} | Interested: {p.get('preferred_gender','?')}{age_str}"
-            f"\nBio: {bio}\nLocation: {loc}{vb}")
+            age_str = f" | {calc_age(dob)}"
+    return (f"👤 <b>Your Profile</b>\n\n"
+            f"Name: {p.get('name','?')}\n"
+            f"Gender: {p.get('gender','?')} | Interested in: {p.get('preferred_gender','?')}{age_str}\n"
+            f"Bio: {bio}\n"
+            f"Location: {loc}{vb}")
 
 
 
@@ -747,10 +769,11 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.set_state(Signup.name)
     await state.update_data(last_bot_msg=None, prev_bot_msg=None)
     msg = await message.answer(
-        "\U0001f44b Hey! I'm <b>Winkly</b>. I'll help you find people nearby.\n\n"
-        "Let's set up your profile \u2014 it only takes ~30 seconds.\n\n"
-        "<b>Step 1 of 6</b>\n\n"
-        "\U0001f464 <b>What's your name?</b>",
+        "Hey there! 👋\n\n"
+        "I'm <b>Winkly</b> — your wingman on Telegram.\n\n"
+        "Finding someone real nearby shouldn't feel like a part-time job.\n\n"
+        "Let's build your profile — it takes about 30 seconds.\n\n"
+        "<b>What should people call you?</b>",
         parse_mode='HTML'
     )
     await state.update_data(last_bot_msg=msg.message_id)
@@ -771,11 +794,12 @@ async def h_name(message: types.Message, state: FSMContext):
     await fsm_backup_set(uid, 'username', message.from_user.username or '')
     await state.set_state(Signup.dob)
     msg = await message.answer(
-            "<b>Step 2 of 6</b>\n\n"
-            "📅 <b>When were you born?</b>",
-            parse_mode='HTML',
-            reply_markup=dob_picker_kb(0)
-        )
+        "Great! <b>When were you born?</b>\n\n"
+        "Your age helps us introduce you to people in a similar stage of life.\n\n"
+        "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
+        parse_mode='HTML',
+        reply_markup=dob_picker_kb(0)
+    )
     await state.update_data(prev_bot_msg=msg.message_id)
 
 
@@ -797,11 +821,10 @@ async def h_gender(message: types.Message, state: FSMContext):
     await state.update_data(gender=GENDER_KW[keyword])
     await state.set_state(Signup.preferred)
     msg = await message.answer(
-        "<b>Step 4 of 6</b>\n\n"
-        "\U0001f49d <b>Who are you interested in?</b>",
+        "<b>Who are you looking to meet?</b>",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Male", callback_data="pref:Male")],
-            [InlineKeyboardButton(text="👩 Female", callback_data="pref:Female")],
+            [InlineKeyboardButton(text="👨 Men", callback_data="pref:Male")],
+            [InlineKeyboardButton(text="👩 Women", callback_data="pref:Female")],
             [InlineKeyboardButton(text="👥 Everyone", callback_data="pref:Everyone")],
         ])
     )
@@ -831,11 +854,12 @@ async def h_preferred(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
     await state.set_state(Signup.location)
     msg = await message.answer(
-        "<b>Step 5 of 6</b>\n\n"
-        "\U0001f4cd <b>Share your location</b> or type a place name:",
+        "<b>Where should we look for matches?</b>\n\n"
+        "Share your location or type a city/area name.\n\n"
+        "Don't worry — we only show your general area, not your exact address.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
-            [InlineKeyboardButton(text="⌨️  Enter Place Name", callback_data="loc_enter_text")],
+            [InlineKeyboardButton(text="⌨️ Type a Place", callback_data="loc_enter_text")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
@@ -868,11 +892,12 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     await fsm_backup_set(uid, 'location_name', 'GPS')
     await state.set_state(Signup.bio)
     msg = await message.answer(
-        "<b>Step 6 of 6</b>\n\n"
-        "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+        "<b>Almost done!</b>\n\n"
+        "📝 <b>Write a short bio</b> — or skip for now.\n\n"
+        "Something like: \"Coffee addict, weekend traveler, looking for a real connection.\"",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
+            [InlineKeyboardButton(text="⏭️ Skip for now", callback_data="signup_skip_bio")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
@@ -914,11 +939,12 @@ async def h_loc_text(message: types.Message, state: FSMContext):
     await fsm_backup_set(uid, 'location_name', text)
     await state.set_state(Signup.bio)
     msg = await message.answer(
-        "<b>Step 6 of 6</b>\n\n"
-        "\U0001f4dd <b>Tell us about yourself</b> (optional)\n\nWrite a short bio or tap Skip.",
+        "<b>Almost done!</b>\n\n"
+        "📝 <b>Write a short bio</b> — or skip for now.\n\n"
+        "Something like: \"Coffee addict, weekend traveler, looking for a real connection.\"",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\u23ed\ufe0f Skip", callback_data="signup_skip_bio")],
+            [InlineKeyboardButton(text="⏭️ Skip for now", callback_data="signup_skip_bio")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
@@ -1040,7 +1066,7 @@ async def h_dob(message: types.Message, state: FSMContext):
     raw = (message.text or '').strip()
     if not raw:
         await message.answer(
-            "\u26a0\ufe0f <b>Please enter your date of birth.</b>\n\n"
+            "<b>Please enter your date of birth.</b>\n\n"
             "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
             parse_mode='HTML'
         )
@@ -1049,7 +1075,7 @@ async def h_dob(message: types.Message, state: FSMContext):
     dob = parse_dob(raw)
     if dob is None:
         await message.answer(
-            "\u26a0\ufe0f <b>Couldn't understand that date.</b>\n\n"
+            "<b>Hmm, we couldn't read that date.</b>\n\n"
             "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
             parse_mode='HTML'
         )
@@ -1072,8 +1098,8 @@ async def h_dob(message: types.Message, state: FSMContext):
     await state.update_data(dob=raw)
     await state.set_state(Signup.gender)
     msg = await message.answer(
-        "<b>Step 3 of 6</b>\n\n"
-        "\u2696\ufe0f <b>What's your gender?</b>",
+        "<b>What's your gender?</b>\n\n"
+        "This is shown on your profile so people know who they're talking to.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
             [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
@@ -1133,7 +1159,7 @@ async def cmd_stop(message: types.Message):
         try:
             await bot.send_message(
                 partner,
-                f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} left the chat.",
+                f"🔚 <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} left the chat.",
                 parse_mode='HTML'
             )
         except:
@@ -1142,8 +1168,8 @@ async def cmd_stop(message: types.Message):
     if partner:
         active_matches.get(uid, {}).pop(partner, None)
         active_matches.get(partner, {}).pop(uid, None)
-    await message.answer("\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
-                         parse_mode='HTML', reply_markup=reengage_kb(uid))
+    await message.answer("🔚 <b>Chat ended.</b>\n\nWhat would you like to do next?",
+            parse_mode='HTML', reply_markup=reengage_kb(uid))
 
 # ─── /verify ────────────────────────────────────────────────────────────────
 
@@ -1187,7 +1213,7 @@ async def cmd_premium(message: types.Message):
     await message.answer(
         f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')],
+            [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
         ])
     )
@@ -1401,11 +1427,12 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     n = partner.get('name', '?')
     g = partner.get('gender', '?')
     txt = (
-        f"\U0001f389 <b>You matched with</b> {n}\n"
-        f"\u2696\ufe0f {g}"
+        f"🎉 <b>It's a match!</b>\n\n"
+        f"You and <b>{n}</b> seem to be on the same wavelength.\n\n"
+        f"Say something nice. 💬"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="\U0001f4ac  Chat Now", callback_data=f'chat:{pid}')],
+        [InlineKeyboardButton(text="💬 Chat Now", callback_data=f'chat:{pid}')],
     ])
     await bot.send_message(cid, txt, parse_mode='HTML', reply_markup=kb)
 
@@ -1430,7 +1457,7 @@ async def skip_match(cb: types.CallbackQuery):
     await safe_delete(uid, cb.message.message_id)
     await bot.send_message(
         uid,
-        "\u274c <b>Skipped.</b> You won't be matched with this person again.\n\n"
+        "⏭️ <b>Skipped.</b> You won't see this person again.\n\n"
         "What would you like to do next?",
         parse_mode='HTML', reply_markup=reengage_kb(uid)
     )
@@ -1472,7 +1499,7 @@ async def start_chat(cb: types.CallbackQuery, state: FSMContext):
     try:
         await bot.send_message(
             pid,
-            f"\U0001f4ac <b>{user_profiles[uid]['name']}</b> started a chat with you!",
+            f"💬 <b>{user_profiles[uid]['name']}</b> just started a chat with you! Say hello. 👋",
             parse_mode='HTML'
         )
     except:
@@ -1489,9 +1516,9 @@ async def say_hi(cb: types.CallbackQuery):
         return
     if not check_text_quota(uid):
             await cb.message.edit_text(
-                "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts.",
+                "⏸️ <b>Text limit reached</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
+                    [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
@@ -1542,7 +1569,7 @@ async def end_chat(cb: types.CallbackQuery):
         try:
             await bot.send_message(
                 partner,
-                f"\U0001f51a <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} left the chat.",
+                f"🔚 <b>Chat ended.</b>\n\n{user_profiles[uid]['name']} left the chat.",
                 parse_mode='HTML'
             )
         except:
@@ -1643,11 +1670,11 @@ async def relay(message: types.Message, state: FSMContext):
         return
     pid = current_chat[uid]
     if not check_text_quota(uid):
-                base = "\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts. You can wait for replies or skip to find a new match."
+                base = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages. Upgrade to keep chatting or find a new match."
                 await message.answer(
                     base,
                     parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
+                        [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day'),
                          InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                     ])
                 )
@@ -1659,13 +1686,13 @@ async def relay(message: types.Message, state: FSMContext):
     if p_receiver and p_receiver.get('gender') in ('Male', 'Other') and not is_premium(pid):
         received = p_receiver.get('received_texts', 0)
         if received >= RECEIVE_LIMIT:
-            # Reuse the existing "Account on hold" bubble for the sender
+            # Reuse the existing "Text limit reached" bubble for the sender
             pname = user_profiles[uid].get('name', 'Someone')
             n = _quota_notif.get(uid)
             count = (n['count'] + 1) if n else 1
-            text = f"\u23f8\ufe0f <b>Account on hold</b>\n\nYou've used all your free texts."
+            text = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day'),
+                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day'),
                  InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -1688,9 +1715,9 @@ async def relay(message: types.Message, state: FSMContext):
             pname = user_profiles[uid].get('name', 'Someone')
             n = _quota_notif.get(pid)
             count = (n['count'] + 1) if n else 1
-            text = f"\U0001f4ec {pname} sent {count} message{'s' if count > 1 else ''}. Buy Premium to read and reply."
+            text = f"📬 <b>{pname}</b> sent {count} message{'s' if count > 1 else ''}. Upgrade to read and reply."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -1740,11 +1767,11 @@ async def prem_1(cb: types.CallbackQuery):
         await cb.answer("Payment failed", show_alert=True)
         return
     await cb.message.edit_text(
-        "\U0001f3c6 <b>TEST 1 Day — Rs1</b>\n\n"
-        "\u2705 Unlimited texts and matches for 1 day\n\n"
+        "🌟 <b>1 Day Unlimited — ₹1</b>\n\n"
+        "Chat freely with your match. No limits for 24 hours.\n\n"
         "Tap below to complete payment:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4b3 Pay Rs1", url=url)],
+            [InlineKeyboardButton(text="💳 Pay ₹1 — Activate Now", url=url)],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
         ])
@@ -1759,7 +1786,7 @@ async def prem_plans(cb: types.CallbackQuery):
         text=f"\U0001f3c6 {p['name']} — Rs{p['price']} (Save {int((1 - p['price']/(49*p['duration']))*100)}%)",
         callback_data=f"premium_select:{p['name']}:{p['price']}:{p['duration']}"
     )] for p in LONG_PLANS]
-    rows.append([InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')])
+    rows.append([InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')])
     rows.append([InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='back_to_premium')])
     await cb.message.edit_text(
         "\U0001f3c6 <b>Premium Plans</b>\n\n" +
@@ -1808,7 +1835,7 @@ async def back_prem(cb: types.CallbackQuery):
         await cb.message.edit_text(
             f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\U0001f3c6 TEST Plan — Rs1", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
         )
