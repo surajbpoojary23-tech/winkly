@@ -619,15 +619,15 @@ def quota_summary(uid: int) -> str:
         exp_str = premium_subscriptions[uid].get('expiry_date', '')
         try:
             exp = datetime.fromisoformat(exp_str); days = (exp - datetime.now()).days
-            return f"PREMIUM ACTIVE - Unlimited! Expires in {days} day{'s' if days != 1 else ''}"
-        except: return "PREMIUM ACTIVE - Unlimited!"
+            return f"🌟 Premium Active — Unlimited. Expires in {days} day{'s' if days != 1 else ''}"
+        except: return "🌟 Premium Active — Unlimited!"
     if is_verified_female(uid):
-        return "VERIFIED FEMALE - Unlimited free access!"
+        return "✅ Verified Female — Unlimited free access, always."
     p = user_profiles.get(uid, {})
     ft = p.get('free_texts', 0)
     if ft > 0:
-        return f"FREE - {ft} free texts left. Upgrade for unlimited."
-    return "FREE LIMIT REACHED - Upgrade for unlimited texts."
+        return f"✉️ {ft} free message{'s' if ft != 1 else ''} remaining — send more with Premium."
+    return "✉️ All free messages sent — 🌟 Upgrade for unlimited texts."
 
 def referral_code(uid: int) -> str:
     secret = BOT_TOKEN.encode()
@@ -1900,7 +1900,7 @@ async def prem_1(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
     if is_premium(uid):
-        await cb.message.edit_text("\U0001f3c6 <b>Already Premium!</b>\n\nYou have unlimited access.",
+        await cb.message.edit_text("🌟 <b>Already Premium!</b>\n\nYou have unlimited access.",
                                     parse_mode='HTML', reply_markup=main_kb(uid))
         await cb.answer()
         return
@@ -1941,7 +1941,7 @@ async def prem_plans(cb: types.CallbackQuery):
         "\U0001f3c6 <b>Premium Plans</b>\n\n" +
         "\n".join(f"• {p['name']} — Rs{p['price']} (~Rs{round(p['price']/p['duration'])}/day, "
                    f"Save {int((1-p['price']/(49*p['duration']))*100)}%)" for p in LONG_PLANS) +
-        "\n\nOr get 1 day for just Rs49.",
+        "\n\nOr get 1 day for just ₹49.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
     await cb.answer()
@@ -1983,7 +1983,7 @@ async def back_prem(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
     if is_premium(uid):
-        await cb.message.edit_text("\U0001f3c6 <b>Already Premium!</b>", parse_mode='HTML', reply_markup=main_kb(uid))
+        await cb.message.edit_text("🌟 <b>Already Premium!</b>", parse_mode='HTML', reply_markup=main_kb(uid))
     else:
         await cb.message.edit_text(
             f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
