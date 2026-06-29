@@ -835,10 +835,6 @@ async def make_payment_link(uid: int, plan_id: str):
     if not plan:
         logger.warning(f"Invalid premium plan requested: {plan_id}")
         return None
-    r = await get_redis()
-    if not r:
-        logger.error("Payment link creation requires Redis pending-payment storage")
-        return None
     result = await asyncio.to_thread(make_link_sync, uid, plan_id)
     if not result or not result.get("url") or not result.get("payment_link_id"):
         return None
@@ -851,9 +847,16 @@ async def make_payment_link(uid: int, plan_id: str):
         "currency": "INR",
         "status": "pending",
     }
-    await r.hset(f'winkly:payment:{link_id}', mapping=pending)
-    await r.expire(f'winkly:payment:{link_id}', 86400)
+    # Always store in-memory (fast path for success page fallback)
     _payment_link_map[link_id] = pending
+    # Also persist in Redis for webhook resilience; best-effort only
+    r = await get_redis()
+    if r:
+        try:
+            await r.hset(f'winkly:payment:{link_id}', mapping=pending)
+            await r.expire(f'winkly:payment:{link_id}', 86400)
+        except Exception:
+            logger.warning(f"Failed to persist pending payment to Redis: {link_id}", exc_info=True)
     return result["url"]
 
 async def safe_delete(chat_id: int, message_id: int):
@@ -2559,15 +2562,28 @@ async def handle_razorpay_webhook(request):
             return web.Response(status=200, text="Ignored")
 
         r = await get_redis()
-        if not r:
-            logger.error("Razorpay webhook cannot validate pending payment without Redis")
-            return web.Response(status=503, text="Payment store unavailable")
-
         pending_key = f'winkly:payment:{link_id}'
-        pending = await r.hgetall(pending_key)
+        pending = None
+        resolved_from_memory = False
+        # Try Redis first, then in-memory fallback
+        if r:
+            pending = await r.hgetall(pending_key)
+        if not pending:
+            pending = _payment_link_map.get(link_id)
+            if pending:
+                resolved_from_memory = True
+                logger.info(f"Razorpay webhook resolved from in-memory map: {link_id}")
         if not pending:
             logger.warning(f"Razorpay webhook for unknown payment link: {link_id}")
             return web.Response(status=400, text="Unknown payment link")
+
+        # Persist to Redis if we resolved from memory (so retries find it)
+        if r and resolved_from_memory:
+            try:
+                await r.hset(pending_key, mapping=pending)
+                await r.expire(pending_key, 86400)
+            except Exception:
+                pass
 
         plan_id = pending.get('plan_id')
         plan = PLAN_CATALOG.get(plan_id)
