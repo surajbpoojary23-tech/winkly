@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_WEBHOOK_URL = 'https://winkly-kmsz.onrender.com'
+
 
 def _present(name: str) -> bool:
     value = os.getenv(name)
@@ -23,9 +25,6 @@ def check_required_environment() -> bool:
         'RAZORPAY_KEY_SECRET',
         'RAZORPAY_WEBHOOK_SECRET',
     ]
-    if _present('WEBHOOK_URL'):
-        required_vars.append('TELEGRAM_WEBHOOK_PATH')
-
     missing = [name for name in required_vars if not _present(name)]
     if missing:
         print(f"FAIL missing required environment variables: {', '.join(missing)}")
@@ -52,7 +51,7 @@ def check_port_binding() -> bool:
 
 
 def check_webhook_config() -> bool:
-    webhook_url = os.getenv('WEBHOOK_URL', '').strip()
+    webhook_url = os.getenv('WEBHOOK_URL', DEFAULT_WEBHOOK_URL).strip()
     if not webhook_url:
         if os.getenv('ALLOW_LONG_POLLING', '').strip().lower() in {'1', 'true', 'yes'}:
             print("OK WEBHOOK_URL not set; long polling explicitly enabled")

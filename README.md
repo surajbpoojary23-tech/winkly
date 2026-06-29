@@ -36,7 +36,7 @@ The bot will start polling. Open Telegram, send `/start`, share your location an
    - `BOT_TOKEN` – the token you received from @BotFather.
    - `REDIS_URL` – your Upstash Redis endpoint (e.g. `rediss://...`).
    - `PORT` – port to bind to (default: 8080, required for webhook mode)
-   - `WEBHOOK_URL` – public base URL (e.g. `https://your-service.onrender.com`)
+   - `WEBHOOK_URL` – public base URL (default: `https://winkly-kmsz.onrender.com`)
    - `TELEGRAM_WEBHOOK_PATH` – Telegram webhook path (default: `/telegram/webhook`)
    - `TELEGRAM_WEBHOOK_SECRET` – optional random 32+ character Telegram webhook secret; if omitted, the bot derives one from `BOT_TOKEN`
    - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
@@ -47,7 +47,7 @@ The bot will start polling. Open Telegram, send `/start`, share your location an
 The error "Conflict: terminated by other getUpdates request" occurs when multiple bot instances run simultaneously. To fix this:
 
 **Option 1: Use Webhook Mode (Recommended)**
-- Set `WEBHOOK_URL` to your Render service base URL (e.g. `https://your-service.onrender.com`)
+- Set `WEBHOOK_URL` to your Render service base URL (`https://winkly-kmsz.onrender.com`) or use the built-in default
 - Set `TELEGRAM_WEBHOOK_SECRET` or let the bot derive it from `BOT_TOKEN`
 - This eliminates polling conflicts and is more reliable for production
 

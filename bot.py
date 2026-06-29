@@ -61,7 +61,8 @@ def required_env(name: str) -> str:
 
 BOT_TOKEN = required_env('BOT_TOKEN')
 REDIS_URL = os.getenv('REDIS_URL', '')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', '').rstrip('/')
+DEFAULT_WEBHOOK_URL = 'https://winkly-kmsz.onrender.com'
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', DEFAULT_WEBHOOK_URL).rstrip('/')
 PORT = int(os.getenv('PORT', '8080'))
 ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', '0'))
 ALLOW_LONG_POLLING = os.getenv('ALLOW_LONG_POLLING', '').strip().lower() in {'1', 'true', 'yes'}
