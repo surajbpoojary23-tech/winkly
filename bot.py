@@ -84,17 +84,17 @@ ALL_COMMANDS = [
     BotCommand(command="premium", description="View premium plans"),
     BotCommand(command="refer", description="Refer friends for free premium"),
 ]
-FEMALE_COMMANDS = [c for c in ALL_COMMANDS if c.command != 'premium']
+NO_PREMIUM_COMMANDS = [c for c in ALL_COMMANDS if c.command != 'premium']
 
-async def set_female_commands(uid: int):
-    """Override bot command scope for a Female user (hide /premium)."""
+async def hide_premium_cmd(uid: int):
+    """Override bot command scope to hide /premium for a specific user."""
     try:
         await bot.set_my_commands(
-            FEMALE_COMMANDS,
+            NO_PREMIUM_COMMANDS,
             scope=BotCommandScopeChat(chat_id=uid)
         )
     except Exception as e:
-        logger.warning(f"Failed to set female commands for {uid}: {e}")
+        logger.warning(f"Failed to hide /premium for {uid}: {e}")
 
 PLAN_CATALOG = {
     "trial_1d": {"name": "TEST 1 Day", "price": 1, "duration": 1},
@@ -931,9 +931,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await state.update_data(ref_code=ref_code)
     if uid in user_profiles:
         p = user_profiles[uid]
-        # Ensure Female users don't see /premium in menu
-        if p.get('gender') == 'Female':
-            await set_female_commands(uid)
+        # Hide /premium from menu button for all users
+        await hide_premium_cmd(uid)
         await message.answer(
             profile_text(p),
             parse_mode='HTML', reply_markup=main_kb(uid)
@@ -1187,9 +1186,8 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     ref_valid = False
     if ref:
         ref_valid = await credit_referrer(ref, uid)
-    # Remove /premium from menu for Female users
-    if prof.get('gender') == 'Female':
-        await set_female_commands(uid)
+    # Hide /premium from menu button for all users
+    await hide_premium_cmd(uid)
     await state.clear()
     msg_text = "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof)
     if ref and not ref_valid:
@@ -2719,7 +2717,7 @@ async def auto_setup_webhook():
 async def on_startup(dispatcher: Dispatcher):
     logger.info("Starting Winkly Bot v2...")
     # Menu button (left of emoji bar) showing bot commands
-    # Default: all 7 commands (Male/Other). Female users override via per-user scope on signup.
+    # Default: all 7 commands for unregistered users. /premium hidden per-user on signup or /start.
     try:
         await bot.set_my_commands(ALL_COMMANDS, scope=BotCommandScopeDefault())
         logger.info("Menu button added (7 commands for default scope)")
