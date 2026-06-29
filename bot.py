@@ -313,6 +313,10 @@ _payment_link_map: Dict[str, dict] = {}  # payment_link_id -> server-side pendin
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
 _reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
 _quota_locks: Dict[int, asyncio.Lock] = {}
+# In-memory cache for has_text_quota — avoids Redis on every message
+# Key = uid, Value = (remaining_int, expiry_time)
+_QUOTA_CACHE_TTL = 3.0  # seconds
+_quota_cache: Dict[int, tuple[int, float]] = {}
 # === Bot Protection: IP Rate Limiting ===
 import time as _time
 
@@ -444,6 +448,31 @@ async def geocode(place: str):
         logger.warning(f"Geocode failed: {e}")
     return None, None
 
+
+async def reverse_geocode(lat: float, lon: float) -> str:
+    """
+    Convert GPS coordinates to a human-readable place name using Nominatim (free).
+    Returns the city/town name, or empty string on failure.
+    """
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                'https://nominatim.openstreetmap.org/reverse',
+                params={'lat': str(lat), 'lon': str(lon), 'format': 'json', 'zoom': '14'},
+                headers={'User-Agent': 'WinklyBot/1.0'},
+                timeout=aiohttp.ClientTimeout(total=8)
+            ) as r:
+                if r.status == 200:
+                    d = await r.json()
+                    addr = d.get('address', {})
+                    for key in ('city', 'town', 'village', 'suburb', 'county'):
+                        if addr.get(key):
+                            return addr[key]
+                    return d.get('display_name', '')
+    except Exception as e:
+        logger.warning(f"Reverse geocode failed: {e}")
+    return ''
+
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371; phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1); dlam = math.radians(lon2 - lon1)
@@ -547,23 +576,31 @@ def _quota_lock(uid: int) -> asyncio.Lock:
     return lock
 
 async def has_text_quota(uid: int) -> bool:
-    """Check quota using Redis when available so workers see the same balance."""
+    """Check quota using cache (3s TTL) then Redis as fallback."""
     p = user_profiles.get(uid)
     if not p:
         return False
     if is_premium(uid) or is_verified_female(uid):
         return True
+    now = time.time()
+    # Check in-memory cache first
+    cached = _quota_cache.get(uid)
+    if cached:
+        remaining, exp = cached
+        if now < exp:
+            return remaining > 0
     r = await get_redis()
-    if not r:
-        return p.get('free_texts', 0) > 0
     key = f'winkly:quota:{uid}:free_texts'
-    await r.setnx(key, int(p.get('free_texts', 0)))
-    try:
-        remaining = int(await r.get(key) or 0)
-    except (TypeError, ValueError):
-        remaining = 0
-    p['free_texts'] = remaining
-    return remaining > 0
+    if r:
+        await r.setnx(key, int(p.get('free_texts', 0)))
+        try:
+            remaining = int(await r.get(key) or 0)
+        except (TypeError, ValueError):
+            remaining = 0
+        p['free_texts'] = remaining
+        _quota_cache[uid] = (remaining, now + _QUOTA_CACHE_TTL)
+        return remaining > 0
+    return p.get('free_texts', 0) > 0
 
 async def reserve_text_quota(uid: int) -> bool:
     """Atomically reserve one outgoing text before delivery."""
@@ -590,13 +627,11 @@ return current
             if remaining < 0:
                 return False
             p['free_texts'] = remaining
-            await save_all()
             return True
         remaining = int(p.get('free_texts', 0) or 0)
         if remaining <= 0:
             return False
         p['free_texts'] = remaining - 1
-        await save_all()
         return True
 
 async def refund_text_quota(uid: int):
@@ -808,7 +843,12 @@ def make_link_sync(uid: int, plan_id: str):
             "options": {
                 "checkout": {
                     "name": "Winkly",
-                    "description": "Premium Dating"
+                    "description": "Premium Dating",
+                    "prefill": {
+                        "contact": "",
+                        "email": "",
+                        "name": ""
+                    }
                 }
             },
         }
@@ -1062,17 +1102,23 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
 
     if d.get('is_editing'):
         prof = user_profiles.get(uid, {})
-        prof.update({'lat': str(loc.latitude), 'lon': str(loc.longitude), 'location_name': 'GPS'})
+        loc_name = await reverse_geocode(loc.latitude, loc.longitude)
+        if not loc_name:
+            loc_name = 'GPS'
+        prof.update({'lat': str(loc.latitude), 'lon': str(loc.longitude), 'location_name': loc_name})
         user_profiles[uid] = prof
         await save_all()
         await state.clear()
         await message.answer("✅ Location updated!", reply_markup=ReplyKeyboardRemove())
         return
 
-    await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name='GPS')
+    loc_name = await reverse_geocode(loc.latitude, loc.longitude)
+    if not loc_name:
+        loc_name = 'GPS'
+    await state.update_data(lat=str(loc.latitude), lon=str(loc.longitude), location_name=loc_name)
     await fsm_backup_set(uid, 'lat', str(loc.latitude))
     await fsm_backup_set(uid, 'lon', str(loc.longitude))
-    await fsm_backup_set(uid, 'location_name', 'GPS')
+    await fsm_backup_set(uid, 'location_name', loc_name)
     await state.set_state(Signup.bio)
     await message.answer("📍 Got it!", reply_markup=ReplyKeyboardRemove())
     msg = await message.answer(
@@ -1848,7 +1894,8 @@ async def relay(message: types.Message, state: FSMContext):
                 return
     # Receiver's receive limit: Male/Other without premium limited to RECEIVE_LIMIT total
     p_receiver = user_profiles.get(pid)
-    if p_receiver and p_receiver.get('gender') in ('Male', 'Other') and not is_premium(pid):
+    if (p_receiver and p_receiver.get('gender') in ('Male', 'Other')
+            and not is_premium(pid) and not is_verified_female(pid)):
         received = p_receiver.get('received_texts', 0)
         if received >= RECEIVE_LIMIT:
             # Reuse the existing "Text limit reached" bubble for the sender
