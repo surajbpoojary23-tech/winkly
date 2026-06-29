@@ -1577,7 +1577,7 @@ async def send_match_card(cid: int, partner: dict, pid: int):
     lines = [
         f"🎉 <b>It's a match with {n}!</b>",
         "",
-        f"👤 <b>{n}</b>, {age}{g_short}{vb}",
+        f"👤 <b>{n}</b>, {age} {g_short}{vb}",
     ]
     if loc:
         lines.append(f"📍 location: {loc}")
