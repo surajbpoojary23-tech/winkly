@@ -199,7 +199,6 @@ async def init_storage():
                         prof["rejected"] = []
                     if "dob" not in prof:
                         prof["dob"] = ""
-                    prof['dob'] = ''
                     if "received_texts" not in prof:
                         prof["received_texts"] = 0
                     if "verified_female" not in prof:
