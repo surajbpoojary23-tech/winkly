@@ -898,6 +898,97 @@ async def make_payment_link(uid: int, plan_id: str):
             logger.warning(f"Failed to persist pending payment to Redis: {link_id}", exc_info=True)
     return result["url"]
 
+def fetch_payment_link_sync(link_id: str):
+    if not razorpay_client or not link_id:
+        return None
+    try:
+        return razorpay_client.payment_link.fetch(link_id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch Razorpay payment link {link_id}: {e}")
+        return None
+
+async def reconcile_paid_payment_link(link_id: str):
+    if not link_id:
+        return {"activated": False, "reason": "missing_link"}
+
+    r = await get_redis()
+    pending_key = f'winkly:payment:{link_id}'
+    pending = None
+    if r:
+        try:
+            pending = await r.hgetall(pending_key)
+        except Exception:
+            logger.warning(f"Failed to read pending payment from Redis: {link_id}", exc_info=True)
+    if not pending:
+        pending = _payment_link_map.get(link_id)
+    if not pending:
+        logger.warning(f"Payment reconciliation skipped for unknown link: {link_id}")
+        return {"activated": False, "reason": "unknown_link"}
+
+    plan_id = pending.get("plan_id")
+    plan = PLAN_CATALOG.get(plan_id)
+    if not plan:
+        logger.warning(f"Payment reconciliation invalid plan for {link_id}: {plan_id}")
+        return {"activated": False, "reason": "invalid_plan"}
+
+    payment_link = await asyncio.to_thread(fetch_payment_link_sync, link_id)
+    if not payment_link:
+        return {"activated": False, "reason": "fetch_failed"}
+
+    status = str(payment_link.get("status", "")).lower()
+    amount_paid = int(payment_link.get("amount_paid") or 0)
+    amount = int(payment_link.get("amount") or 0)
+    expected_amount = int(pending.get("amount", "0"))
+    currency = payment_link.get("currency")
+    if status != "paid" or amount_paid < expected_amount or amount != expected_amount or currency != pending.get("currency"):
+        logger.info(f"Payment reconciliation not paid/mismatched for {link_id}: status={status}")
+        return {"activated": False, "reason": "not_paid"}
+
+    notes = payment_link.get("notes") or {}
+    if str(notes.get("uid", pending.get("uid"))) != pending.get("uid"):
+        return {"activated": False, "reason": "uid_mismatch"}
+    if str(notes.get("plan_id", plan_id)) != plan_id:
+        return {"activated": False, "reason": "plan_mismatch"}
+
+    payments = payment_link.get("payments") or []
+    captured = [p for p in payments if str(p.get("status", "")).lower() == "captured"]
+    payment_id = None
+    if captured:
+        payment_id = captured[-1].get("payment_id") or captured[-1].get("id")
+    payment_id = payment_id or f"payment_link.paid:{link_id}"
+
+    processed_keys = [
+        f'winkly:processed_payment:{payment_id}',
+        f'winkly:processed_payment:payment_link.paid:{link_id}',
+    ]
+    if r:
+        claimed = await r.set(processed_keys[0], '1', nx=True, ex=86400 * 365)
+        if not claimed:
+            return {"activated": False, "reason": "already_processed"}
+        await r.set(processed_keys[1], '1', ex=86400 * 365)
+    elif payment_id in _processed_payments:
+        return {"activated": False, "reason": "already_processed"}
+
+    uid = int(pending["uid"])
+    dur = int(plan["duration"])
+    exp = await activate_premium(uid, dur)
+    _processed_payments.add(payment_id)
+    _processed_payments.add(f"payment_link.paid:{link_id}")
+    if r:
+        await r.hset(pending_key, mapping={
+            "status": "paid",
+            "payment_id": str(payment_id),
+            "paid_at": datetime.now().isoformat(),
+        })
+        await r.expire(pending_key, 86400 * 30)
+    logger.info(f"Premium reconciled for uid={uid}, plan_id={plan_id}, until={exp.isoformat()}")
+    try:
+        msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
+        await bot.send_message(uid, msg, parse_mode='HTML')
+    except Exception as e:
+        logger.warning(f"Premium reconciliation message failed for uid={uid}: {e}")
+    return {"activated": True, "uid": uid, "duration": dur, "expiry": exp.isoformat()}
+
 async def safe_delete(chat_id: int, message_id: int):
     if message_id:
         try: await bot.delete_message(chat_id, message_id)
@@ -2734,9 +2825,15 @@ async def payment_success_page(request):
         bool(request.query.get('razorpay_payment_link_id')),
         bool(request.query.get('razorpay_payment_id')),
     )
+    result = await reconcile_paid_payment_link(request.query.get('razorpay_payment_link_id', ''))
+    activated = bool(result.get('activated'))
+    title = "Premium Activated - Winkly" if activated else "Payment Received - Winkly"
+    heading = "Premium Activated!" if activated else "Payment Received"
+    message = "Your premium is active. Open Telegram and start chatting!" if activated else "Your payment is being verified by Razorpay."
+    followup = "" if activated else "<p>Premium activates in Telegram after secure server confirmation.</p>"
     return web.Response(
         content_type='text/html',
-        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment Received - Winkly</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>Payment Received</h1><p>Your payment is being verified by Razorpay.</p><p>Premium activates in Telegram after webhook confirmation.</p><a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
+        text=f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>body{{font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:40px 20px}}.card{{background:#16213e;border-radius:16px;padding:32px;max-width:400px;margin:0 auto}}.check{{font-size:64px;margin-bottom:16px}}.btn{{background:#e94560;color:#fff;border:none;border-radius:8px;padding:14px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block;margin-top:16px}}</style></head><body><div class="card"><div class="check">&#9989;</div><h1>{heading}</h1><p>{message}</p>{followup}<a class="btn" href="https://t.me/{BOT_USERNAME}">Open Telegram</a></div></body></html>'
     )
 
     link_id = request.query.get('razorpay_payment_link_id')
