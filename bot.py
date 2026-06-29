@@ -452,7 +452,7 @@ async def geocode(place: str):
 async def reverse_geocode(lat: float, lon: float) -> str:
     """
     Convert GPS coordinates to a human-readable place name using Nominatim (free).
-    Returns the city/town name, or empty string on failure.
+    Returns the city/town name, or a coordinate fallback string on failure.
     """
     try:
         async with aiohttp.ClientSession() as s:
@@ -468,10 +468,16 @@ async def reverse_geocode(lat: float, lon: float) -> str:
                     for key in ('city', 'town', 'village', 'suburb', 'county'):
                         if addr.get(key):
                             return addr[key]
-                    return d.get('display_name', '')
+                    # Return display_name (full address) if no city-level match
+                    dn = d.get('display_name', '')
+                    if dn:
+                        # Shorten: take just city/district from the full address
+                        parts = dn.split(', ')
+                        return parts[1] if len(parts) > 1 else dn[:60]
     except Exception as e:
         logger.warning(f"Reverse geocode failed: {e}")
-    return ''
+    # Fallback: never return empty — always give coordinates string
+    return f"{lat:.4f}, {lon:.4f}"
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371; phi1, phi2 = math.radians(lat1), math.radians(lat2)
