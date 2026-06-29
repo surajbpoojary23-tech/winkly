@@ -6,7 +6,6 @@ import json
 import logging
 import math
 import os
-# import random
 import re
 import unicodedata
 import time
@@ -22,9 +21,8 @@ import redis.asyncio as redis
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, WebAppInfo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from aiogram.filters.state import State, StatesGroup
-# import cv2
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 
@@ -45,10 +43,6 @@ def _faces_found(image_path: str) -> bool:
         logger.warning(f"Face detection error: {e}")
         return False  # fail-closed: any error = reject
 
-
-async def _verify_face(uid: int, file_id: str) -> bool:
-    """Verification is now automatic — stub to avoid broken code paths."""
-    return True  # auto-verify: no selfie check needed
 
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
@@ -80,6 +74,27 @@ RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID', '')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET', '')
 RAZORPAY_WEBHOOK_SECRET = os.getenv('RAZORPAY_WEBHOOK_SECRET', '')
 BOT_USERNAME = os.getenv('BOT_USERNAME', 'Winkly_dating_bot')
+
+# Bot command definitions for menu button
+ALL_COMMANDS = [
+    BotCommand(command="start", description="Start or restart the bot"),
+    BotCommand(command="profile", description="View your profile"),
+    BotCommand(command="find", description="Find matches"),
+    BotCommand(command="stop", description="End current chat"),
+    BotCommand(command="premium", description="View premium plans"),
+    BotCommand(command="refer", description="Refer friends for free premium"),
+]
+FEMALE_COMMANDS = [c for c in ALL_COMMANDS if c.command != 'premium']
+
+async def set_female_commands(uid: int):
+    """Override bot command scope for a Female user (hide /premium)."""
+    try:
+        await bot.set_my_commands(
+            FEMALE_COMMANDS,
+            scope=BotCommandScopeChat(chat_id=uid)
+        )
+    except Exception as e:
+        logger.warning(f"Failed to set female commands for {uid}: {e}")
 
 PLAN_CATALOG = {
     "trial_1d": {"name": "TEST 1 Day", "price": 1, "duration": 1},
@@ -388,8 +403,6 @@ class Signup(StatesGroup):
     bio = State()
     dob = State()
 
-class Verify(StatesGroup):
-    photo = State()
 
 class EditProfile(StatesGroup):
     name = State()
@@ -915,6 +928,9 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await state.update_data(ref_code=ref_code)
     if uid in user_profiles:
         p = user_profiles[uid]
+        # Ensure Female users don't see /premium in menu
+        if p.get('gender') == 'Female':
+            await set_female_commands(uid)
         await message.answer(
             profile_text(p),
             parse_mode='HTML', reply_markup=main_kb(uid)
@@ -1170,6 +1186,9 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
     ref_valid = False
     if ref:
         ref_valid = await credit_referrer(ref, uid)
+    # Remove /premium from menu for Female users
+    if prof.get('gender') == 'Female':
+        await set_female_commands(uid)
     await state.clear()
     msg_text = "\U0001f389 <b>Profile complete!</b>\n\n" + profile_text(prof)
     if ref and not ref_valid:
@@ -1420,73 +1439,6 @@ async def share_bot(cb: types.CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
-# ─── Verification callbacks ────────────────────────────────────────────────────
-
-@dp.callback_query(lambda cb: cb.data == 'verify_start')
-async def verify_start(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    if uid not in user_profiles:
-        await cb.message.edit_text("📝 Please set up your profile first with /start.")
-        await cb.answer()
-        return
-    await cb.message.edit_text(
-        "✅ <b>You're Verified!</b>\n\n"
-        "All users are auto-verified at signup. Go find your match! 💕",
-        parse_mode='HTML', reply_markup=main_kb(uid)
-    )
-    await cb.answer()
-
-
-@dp.callback_query(lambda cb: cb.data == 'reverify')
-async def reverify(cb: types.CallbackQuery, state: FSMContext):
-    uid = cb.from_user.id
-    await mark_online(uid)
-    if uid not in user_profiles:
-        await cb.message.edit_text("📝 Please set up your profile first with /start.")
-        await cb.answer()
-        return
-    await cb.message.edit_text(
-        "✅ <b>You're Verified!</b>\n\n"
-        "All users are auto-verified at signup. Go find your match! 💕",
-        parse_mode='HTML', reply_markup=main_kb(uid)
-    )
-    await cb.answer()
-    text = (
-        '📸 <b>Selfie Verification</b>\n\n'
-        'Tap the button below to open your <b>front camera</b>.\n'
-        '✔️ All genders get a <b>verified badge</b>.\n'
-        '🏆 <b>Female</b> users also get <b>unlimited free access</b>!'
-    )
-    markup = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text='📸 Take Selfie', request_photo=True)]],
-        one_time_keyboard=True,
-        resize_keyboard=True
-    )
-    try:
-        await cb.message.edit_text(text, parse_mode='HTML', reply_markup=markup)
-    except:
-        await cb.message.answer(text, parse_mode='HTML', reply_markup=markup)
-    await cb.answer()
-
-
-@dp.message(StateFilter(Verify.photo))
-async def h_verify_photo(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "✅ <b>You're Verified!</b>\n\n"
-        "All users are auto-verified at signup. Go find your match! 💕",
-        parse_mode='HTML', reply_markup=main_kb(message.from_user.id)
-    )
-    return  # all users already verified at signup
-
-    # --- dead code below kept as stub references to avoid breaking other code ---
-
-
-async def send_verification_to_admin(uid: int):
-    """Stub — verification is now automatic, admin approval no longer needed."""
-    pass
-
 @dp.callback_query(lambda cb: cb.data.startswith('admin_approve:'))
 async def admin_approve(cb: types.CallbackQuery):
     if cb.from_user.id != ADMIN_CHAT_ID:
@@ -1500,7 +1452,6 @@ async def admin_approve(cb: types.CallbackQuery):
         return
     p['verified'] = True
     p['verification_status'] = 'approved'
-    # p.pop('selfie', None)
     await save_all()
     try:
         txt = cb.message.caption or cb.message.text
@@ -1532,7 +1483,6 @@ async def admin_reject(cb: types.CallbackQuery):
         await cb.answer("User gone.")
         return
     p['verification_status'] = 'rejected'
-    # p.pop('selfie', None)
     await save_all()
     try:
         txt = cb.message.caption or cb.message.text
@@ -1672,7 +1622,6 @@ async def start_chat(cb: types.CallbackQuery, state: FSMContext):
         "Use /stop to end the chat.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="\U0001f44b Say Hi", callback_data=f'say_hi:{pid}')],
-            [InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_chat')],
         ])
     )
     # Notify partner that someone started a chat — they will see your hi when you send it
@@ -1717,12 +1666,6 @@ async def say_hi(cb: types.CallbackQuery):
         await save_all()
     except:
         await refund_text_quota(uid)
-        pass
-    try:
-        await cb.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_chat')],
-        ]))
-    except:
         pass
     await cb.answer()
 
@@ -1832,8 +1775,7 @@ async def wait_in_chat(cb: types.CallbackQuery):
         "Send your messages below. Tap <b>Say Hi</b> to introduce yourself!\n\n"
         "Use /stop to end the chat.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f44b Say Hi", callback_data=f'say_hi:{pid}'),
-             InlineKeyboardButton(text="\U0001f51a End Chat", callback_data='end_chat')],
+            [InlineKeyboardButton(text="\U0001f44b Say Hi", callback_data=f'say_hi:{pid}')],
         ])
     )
     await cb.answer()
@@ -2722,142 +2664,6 @@ async def auto_setup_webhook():
         logger.info(f"URL: {WEBHOOK_URL}/razorpay/webhook")
 
 
-SELFIE_PAGE = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;color:#fff;font-family:-apple-system,sans-serif;padding:16px}
-#file-input{display:none}
-.video-wrap{display:none;flex-direction:column;align-items:center;width:100%;max-width:400px}
-video{width:100%;border-radius:12px;transform:scaleX(-1)}
-#capture{margin-top:16px;padding:14px 40px;font-size:18px;border:none;border-radius:40px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600}
-#capture:disabled{opacity:.5}
-.open-camera-btn{margin-top:16px;padding:12px 24px;font-size:15px;border:1px solid #555;border-radius:40px;background:transparent;color:#aaa;cursor:pointer}
-#status{margin-top:14px;font-size:14px;text-align:center;color:#888}
-.main-wrap{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px}
-.main-title{font-size:22px;font-weight:700}
-.main-sub{font-size:14px;color:#888;text-align:center}
-#selfie-btn{padding:18px 48px;font-size:20px;border:none;border-radius:50px;background:#2ea043;color:#fff;cursor:pointer;font-weight:600;width:100%;max-width:320px}
-#selfie-btn:disabled{opacity:.5}
-#cam-btn{padding:14px 32px;font-size:16px;border:1px solid #2ea043;border-radius:50px;background:transparent;color:#2ea043;cursor:pointer}
-</style></head><body>
-<input type="file" id="file-input" accept="image/*" capture="user">
-<div class="main-wrap" id="main-wrap">
-  <div class="main-title">📸 Selfie Verification</div>
-  <div class="main-sub">Your face must be clearly visible.<br>Good lighting, front camera recommended.</div>
-  <button id="selfie-btn">📸 Take Selfie</button>
-  <button id="cam-btn">📹 Use Camera</button>
-  <div id="status"></div>
-</div>
-<div class="video-wrap" id="video-wrap">
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas" style="display:none"></canvas>
-  <button id="capture">📸 Capture</button>
-  <button id="stop-btn" class="open-camera-btn">← Back</button>
-  <div id="status2"></div>
-</div>
-<script>
-Telegram.WebApp.ready();Telegram.WebApp.expand();
-const fi=document.getElementById('file-input'),uid=new URLSearchParams(window.location.search).get('uid');
-const main=document.getElementById('main-wrap'),vw=document.getElementById('video-wrap');
-const v=document.getElementById('video'),c=document.getElementById('canvas');
-const cap=document.getElementById('capture'),st=document.getElementById('status'),st2=document.getElementById('status2');
-const sbtn=document.getElementById('selfie-btn'),cbtn=document.getElementById('cam-btn'),stop=document.getElementById('stop-btn');
-let stream=null;
-
-function uploadBlob(b,txt){
-  st.textContent=txt||'Uploading...';cap.disabled=1;
-  const fd=new FormData();fd.append('photo',b,'selfie.jpg');fd.append('uid',uid);
-  fetch('/api/upload_selfie',{method:'POST',body:fd}).then(r=>r.text()).then(res=>{
-    if(res==='OK'){st.textContent='\u2705 Selfie uploaded! Check Telegram';setTimeout(()=>Telegram.WebApp.close(),1500)}
-    else if(res==='NO_FACE'){st.textContent='\u274c No face detected. Try again';cap.disabled=0}
-    else{st.textContent='\u274c Error: '+res;cap.disabled=0}
-  }).catch(e=>{st.textContent='Upload error: '+e.message;cap.disabled=0});
-}
-
-// File input — primary path (opens camera app directly on mobile)
-sbtn.onclick=()=>fi.click();
-fi.onchange=()=>{const f=fi.files[0];if(f)uploadBlob(f,'Uploading...')};
-
-// Camera path — getUserMedia (reliable on iOS, some Android, desktop)
-cbtn.onclick=async()=>{
-  main.style.display='none';vw.style.display='flex';st2.textContent='Opening camera...';
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'user'},width:{ideal:480},height:{ideal:640}}});
-    v.srcObject=stream;st2.textContent='Look at the camera, then tap Capture';
-    cap.style.display='';stop.style.display='';
-  }catch(e){vw.style.display='none';main.style.display='flex';st.textContent='Camera not available. Use the button above.'}
-};
-cap.onclick=()=>{if(!stream)return;c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);c.toBlob(b=>uploadBlob(b,'Uploading...'),'image/jpeg',0.85)};
-stop.onclick=()=>{if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}vw.style.display='none';main.style.display='flex';st.textContent=''};
-</script></body></html>"""
-
-
-async def handle_selfie_page(request):
-    return web.Response(status=410, text='Selfie verification disabled')
-    uid = request.query.get('uid', '')
-    page = SELFIE_PAGE.replace('{uid}', uid)
-    return web.Response(text=page, content_type='text/html')
-
-
-async def handle_upload_selfie(request):
-    return web.Response(status=410, text='Selfie verification disabled')
-    try:
-        data = await request.post()
-        uid_str = data.get('uid', '')
-        photo_field = data.get('photo')
-        if not uid_str or not photo_field:
-            return web.Response(text='MISSING_FIELDS', status=400)
-        uid = int(uid_str)
-        raw = photo_field.file.read()
-        tmp = f"/tmp/selfie_upload_{uid}.jpg"
-        with open(tmp, 'wb') as f:
-            f.write(raw)
-        ok = _faces_found(tmp)
-        if ok:
-            # Upload to Telegram to get a proper file_id we can use in send_photo
-            try:
-                file_id = await bot.upload_file(tmp, destination=bot.file)
-                # Upload_file doesn't return file_id directly — use send_document approach
-                # Instead, save locally and send as file path
-                import shutil
-                saved = f"/tmp/verified_selfie_{uid}.jpg"
-                shutil.copy(tmp, saved)
-                user_profiles[uid]['selfie'] = saved
-                user_profiles[uid]['verified'] = True
-                user_profiles[uid]['verification_status'] = 'verified'
-                await save_all()
-                g = user_profiles[uid].get('gender', '')
-                if g == 'Female':
-                    await bot.send_message(uid,
-                        "\u2705 <b>Verified!</b>\n\nSelfie verified. You now have unlimited free access to chat.\n\nGo find your match! \u2764\ufe0f",
-                        parse_mode='HTML', reply_markup=main_kb(uid))
-                else:
-                    await bot.send_message(uid,
-                        "\u2705 <b>Verified!</b>\n\nSelfie verified. Your profile now shows a verified badge \u2714\ufe0f.",
-                        parse_mode='HTML', reply_markup=main_kb(uid))
-            except Exception as e:
-                logger.error(f"Selfie upload to Telegram failed: {e}")
-                user_profiles[uid]['verified'] = True
-                user_profiles[uid]['verification_status'] = 'verified'
-                await save_all()
-        else:
-            try:
-                os.remove(tmp)
-            except:
-                pass
-            await bot.send_message(uid,
-                "\U0001f914 <b>No face detected.</b>\n\nPlease try again — make sure your face is clearly visible and front camera is used.",
-                parse_mode='HTML',
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📸 Try Again", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/selfie?uid={uid}"))],
-                ]))
-        return web.Response(text='OK' if ok else 'NO_FACE')
-    except Exception as e:
-        logger.error(f"Upload selfie error: {e}")
-        return web.Response(text='SERVER_ERROR', status=500)
-
 
 # ─── DEV: Direct premium activation for testing (remove in production) ───────
 # ─── Startup ───────────────────────────────────────────────────────────────
@@ -2865,18 +2671,10 @@ async def handle_upload_selfie(request):
 async def on_startup(dispatcher: Dispatcher):
     logger.info("Starting Winkly Bot v2...")
     # Menu button (left of emoji bar) showing bot commands
-    commands = [
-        BotCommand(command="start", description="Start or restart the bot"),
-        BotCommand(command="profile", description="View your profile"),
-        BotCommand(command="find", description="Find matches"),
-        BotCommand(command="stop", description="End current chat"),
-        # BotCommand(command="verify", description="Get Verified"),  # removed
-        BotCommand(command="premium", description="View premium plans"),
-        BotCommand(command="refer", description="Refer friends for free premium"),
-    ]
+    # Default: all 7 commands (Male/Other). Female users override via per-user scope on signup.
     try:
-        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-        logger.info("Menu button added")
+        await bot.set_my_commands(ALL_COMMANDS, scope=BotCommandScopeDefault())
+        logger.info("Menu button added (7 commands for default scope)")
     except Exception as e:
         logger.error(f"Failed to set commands: {e}")
 
