@@ -1531,11 +1531,10 @@ async def do_match(cb: types.CallbackQuery):
     online = await get_online_count()
     ql = len(waiting_queue)
     sm = await cb.message.edit_text(
-        f"\U0001f465 <b>{online} people online</b> | \u23f3 <b>{ql} in queue</b>\n\n"
-        f"\U0001f464 <b>{me['name']}</b>, searching for someone compatible...\n\n"
-        "\u23f3 <b>Searching (attempt 1/3)...</b>\n\n"
-        "_The search will retry up to 3 times if no match is found._",
-        parse_mode='Markdown'
+        f"\U0001f465 <b>{online}</b> online  \u00b7  \u23f3 <b>{ql}</b> in queue\n\n"
+        f"\U0001f464 <b>{me['name']}</b>, finding someone great for you...\n\n"
+        "<i>The right connection takes a moment \u2728</i>",
+        parse_mode='HTML'
     )
     _queue_msg_ids[uid] = sm.message_id
     await save_all()
@@ -2455,15 +2454,12 @@ async def update_counters_loop():
             ql = len(waiting_queue)
             for uid, mid in list(_queue_msg_ids.items()):
                 if uid in waiting_queue and uid in user_profiles:
-                    retries = waiting_queue[uid].get('retries', 0)
-                    attempt = min(retries + 1, 3)
                     status_text = (
-                        f"\U0001f465 {online} online | \u23f3 {ql} in queue\n\n"
-                        f"\U0001f464 {user_profiles[uid].get('name', '?')}, searching...\n"
-                        f"\u23f3 Attempt {attempt}/3"
+                        f"\U0001f465 {online} online  \u00b7  \u23f3 {ql} in queue\n\n"
+                        f"\U0001f464 {user_profiles[uid].get('name', '?')}, still looking... \u2728"
                     )
                     try:
-                        await bot.edit_message_text(status_text, uid, mid, parse_mode='Markdown')
+                        await bot.edit_message_text(status_text, uid, mid, parse_mode='HTML')
                     except:
                         pass
         except Exception as e:
@@ -2514,9 +2510,8 @@ async def check_queue_loop():
                                 if uid in _queue_msg_ids:
                                     try:
                                         await bot.edit_message_text(
-                                            f"\U0001f937\u200d\u2642\ufe0f Nobody found yet. "
-                                            f"Retrying automatically ({retries + 1}/3)...",
-                                            uid, _queue_msg_ids[uid], parse_mode='Markdown'
+                                            f"\U0001f50d Looking a little wider... \u2728",
+                                            uid, _queue_msg_ids[uid], parse_mode='HTML'
                                         )
                                     except:
                                         pass
@@ -2525,8 +2520,8 @@ async def check_queue_loop():
                                 if uid in _queue_msg_ids:
                                     try:
                                         await bot.edit_message_text(
-                                            "\U0001f937 <b>Nobody online nearby right now.</b>\n\n"
-                                            "Please try again later!",
+                                            "\U0001f4ab <b>No matches found right now</b>\n\n"
+                                            "Timing is everything \u2014 come back soon!",
                                             uid, _queue_msg_ids[uid], parse_mode='HTML',
                                             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                                                 [InlineKeyboardButton(text="\u2764\ufe0f  Try Again", callback_data='do_match')],
