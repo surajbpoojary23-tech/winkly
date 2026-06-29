@@ -956,8 +956,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "Hey there! 👋\n\n"
         "I'm <b>Winkly</b> — your wingman on Telegram.\n\n"
-        "Finding someone real nearby shouldn't feel like a part-time job.\n\n"
-        "Let's build your profile — it takes about 30 seconds.\n\n"
         "<b>What should people call you?</b>",
         parse_mode='HTML'
     )
