@@ -1375,6 +1375,10 @@ async def cmd_premium(message: types.Message):
     if uid not in user_profiles:
         await message.answer("📝 You haven't set up a profile yet.\nSend /start to begin!")
         return
+    # Premium is for men/other only
+    if user_profiles.get(uid, {}).get('gender') == 'Female':
+        await message.answer("🌟 You already have unlimited access as a verified female user!", parse_mode='HTML', reply_markup=main_kb(uid))
+        return
     if is_premium(uid):
         exp_str = premium_subscriptions[uid].get('expiry_date', '')
         try:
@@ -2005,7 +2009,9 @@ async def prem_sel(cb: types.CallbackQuery):
 async def back_prem(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
-    if is_premium(uid):
+    if user_profiles.get(uid, {}).get('gender') == 'Female':
+        await cb.message.edit_text("🌟 You already have unlimited access!", parse_mode='HTML', reply_markup=main_kb(uid))
+    elif is_premium(uid):
         await cb.message.edit_text("🌟 <b>Already Premium!</b>", parse_mode='HTML', reply_markup=main_kb(uid))
     else:
         await cb.message.edit_text(
