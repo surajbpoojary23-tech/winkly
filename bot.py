@@ -1733,7 +1733,7 @@ async def end_chat(cb: types.CallbackQuery):
     active_matches.get(partner, {}).pop(uid, None)
     await save_all()
     await cb.message.edit_text(
-        "\U0001f51a <b>Chat ended.</b>\n\nWhat would you like to do next?",
+        "🔚 <b>Chat ended.</b>\n\nWhat would you like to do next?",
         parse_mode='HTML', reply_markup=reengage_kb(uid)
     )
     await cb.answer()
