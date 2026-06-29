@@ -865,10 +865,14 @@ async def safe_delete(chat_id: int, message_id: int):
         except: pass
 
 def main_kb(uid: int = None):
-    return InlineKeyboardMarkup(inline_keyboard=[
+    is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
+    rows = [
         [InlineKeyboardButton(text="✏️ Edit Profile", callback_data='edit_profile')],
         [InlineKeyboardButton(text="🔍 Find Matches", callback_data='do_match')],
-    ])
+    ]
+    if not is_female:
+        rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def reengage_kb(uid: int = None):
     is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
