@@ -2746,6 +2746,29 @@ async def on_startup(dispatcher: Dispatcher):
         app.router.add_get('/health', health)
         app.router.add_post('/health', health)
 
+        async def razorpay_status(request):
+            status = {
+                'razorpay_configured': razorpay_client is not None,
+                'key_id_present': bool(RAZORPAY_KEY_ID),
+            }
+            if razorpay_client:
+                try:
+                    # Try to create a test payment link
+                    test_link = razorpay_client.payment_link.create({
+                        'amount': 100,
+                        'currency': 'INR',
+                        'description': 'Winkly Test',
+                        'callback_url': 'https://winkly-kmsz.onrender.com/payment/success',
+                        'callback_method': 'get'
+                    })
+                    status['test_link'] = 'success'
+                    status['test_url'] = test_link.get('short_url')
+                except Exception as e:
+                    status['test_link'] = 'failed'
+                    status['test_error'] = str(e)
+            return web.json_response(status)
+        app.router.add_get('/razorpay-status', razorpay_status)
+
         async def debug(request):
             r = await get_redis()
             if r:
