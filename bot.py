@@ -979,11 +979,9 @@ async def h_name(message: types.Message, state: FSMContext):
     await fsm_backup_set(uid, 'username', message.from_user.username or '')
     await state.set_state(Signup.dob)
     msg = await message.answer(
-        "Great! <b>When were you born?</b>\n\n"
-        "Your age helps us introduce you to people in a similar stage of life.\n\n"
-        "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
-        parse_mode='HTML',
-        reply_markup=dob_picker_kb(0)
+        "Great! <b>How old are you?</b>\n\n"
+        "Enter your age (e.g. 27):",
+        parse_mode='HTML'
     )
     await state.update_data(prev_bot_msg=msg.message_id)
 
@@ -1253,24 +1251,15 @@ async def h_dob(message: types.Message, state: FSMContext):
         await safe_delete(message.chat.id, d['prev_bot_msg'])
 
     raw = (message.text or '').strip()
-    if not raw:
+    if not raw or not raw.isdigit():
         await message.answer(
-            "<b>Please enter your date of birth.</b>\n\n"
-            "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
+            "<b>Please enter your age as a number.</b>\n\n"
+            "Example: 27",
             parse_mode='HTML'
         )
         return
 
-    dob = parse_dob(raw)
-    if dob is None:
-        await message.answer(
-            "<b>Hmm, we couldn't read that date.</b>\n\n"
-            "Try: 15-08-1998  |  1998/08/15  |  August 15 1998",
-            parse_mode='HTML'
-        )
-        return
-
-    age = calc_age(dob)
+    age = int(raw)
     if age < 18:
         await message.answer(
             "\u26d4\ufe0f <b>You must be 18+ to use this bot.</b>",
@@ -1279,12 +1268,14 @@ async def h_dob(message: types.Message, state: FSMContext):
         return
     if age > 100:
         await message.answer(
-            "\u26a0\ufe0f <b>Please enter a valid birth year.</b>",
+            "\u26a0\ufe0f <b>Please enter a valid age (18–100).</b>",
             parse_mode='HTML'
         )
         return
 
-    await state.update_data(dob=raw)
+    birth_year = date.today().year - age
+    raw_dob = f"01-01-{birth_year}"
+    await state.update_data(dob=raw_dob)
     await state.set_state(Signup.gender)
     msg = await message.answer(
         "<b>What's your gender?</b>\n\n"
@@ -2131,7 +2122,7 @@ async def cb_signup_dob(cb: types.CallbackQuery, state: FSMContext):
     await mark_online(uid)
     d = await state.get_data()
     year = int(cb.data.split(':')[1])
-    await state.update_data(dob=str(year), prev_bot_msg=None)
+    await state.update_data(dob=f"01-01-{year}", prev_bot_msg=None)
     await state.set_state(Signup.gender)
     await cb.message.edit_text(
         "<b>Step 3 of 6</b>\n\n"
