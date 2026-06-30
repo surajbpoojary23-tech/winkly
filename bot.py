@@ -372,6 +372,42 @@ async def check_ip_rate_limit(uid: int) -> bool:
         return False
     return True
 
+REPORT_THRESHOLD = 3
+
+async def is_banned_user(uid: int) -> bool:
+    try:
+        r = await get_redis()
+        return await r.sismember('banned_users', str(uid))
+    except Exception:
+        return False
+
+async def add_report(target_uid: int, reporter_uid: int, reason: str):
+    try:
+        import json
+        r = await get_redis()
+        key = f'reports:{target_uid}'
+        from datetime import datetime
+        entry = json.dumps({
+            'reporter': reporter_uid,
+            'reason': reason,
+            'time': datetime.now().isoformat()
+        })
+        await r.rpush(key, entry)
+        count = await r.llen(key)
+        if count >= REPORT_THRESHOLD:
+            await r.sadd('banned_users', str(target_uid))
+        return count
+    except Exception as e:
+        logger.error(f'add_report error: {e}')
+        return 0
+
+async def send_admin(text: str, parse_mode='HTML'):
+    if ADMIN_CHAT_ID:
+        try:
+            await bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode=parse_mode)
+        except Exception as e:
+            logger.warning(f'send_admin failed: {e}')
+
 async def check_account_age(uid: int) -> tuple[bool, str]:
     """
     Check if Telegram account is old enough via getChatMember.
@@ -405,6 +441,14 @@ class Signup(StatesGroup):
     bio = State()
     dob = State()
 
+
+class Report(StatesGroup):
+    reason = State()
+    confirm = State()
+
+class Feedback(StatesGroup):
+    message = State()
+    confirm = State()
 
 class EditProfile(StatesGroup):
     name = State()
@@ -1011,6 +1055,8 @@ def main_kb(uid: int = None):
     ]
     if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
+    rows.append([InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')])
+    rows.append([InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def reengage_kb(uid: int = None):
@@ -1022,6 +1068,8 @@ def reengage_kb(uid: int = None):
     ]
     if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
+    rows.append([InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')])
+    rows.append([InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def edit_profile_kb():
@@ -1069,6 +1117,9 @@ def profile_text(p: dict) -> str:
 async def cmd_start(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
+    if await is_banned_user(uid):
+        await message.answer("\u26d4 Your account has been suspended.")
+        return
     args = message.text.split(' ', 1)
     ref_code = args[1].strip() if len(args) > 1 else None
     if ref_code:
@@ -1600,6 +1651,165 @@ async def share_bot(cb: types.CallbackQuery, state: FSMContext):
         f"3 signups = 1 free day! \U0001f389",
         parse_mode='HTML'
     )
+    await cb.answer()
+
+# ─── Report User ──────────────────────────────────────────────────────────────
+
+@dp.callback_query(lambda cb: cb.data == 'report_user')
+async def report_user(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    if uid not in user_profiles:
+        await cb.message.edit_text("Set up your profile first via /start.")
+        await cb.answer()
+        return
+    partner_uids = []
+    for mid, chat in current_chat.items():
+        if chat.get('other_uid') == uid:
+            partner_uids.append(mid)
+        elif mid == uid:
+            partner_uids.append(chat.get('other_uid'))
+    for a_uid in list(active_matches.keys()):
+        p = user_profiles.get(a_uid, {})
+        if p.get('partner') == uid:
+            partner_uids.append(a_uid)
+    partner_uids = [u for u in set(partner_uids) if u in user_profiles]
+    if not partner_uids:
+        await cb.message.edit_text(
+            "No one to report yet. You can only report users you've matched with.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Back", callback_data='back_to_profile')]
+            ])
+        )
+        await cb.answer()
+        return
+    buttons = []
+    for puid in partner_uids[:10]:
+        pname = user_profiles[puid].get('name', 'User')
+        buttons.append([InlineKeyboardButton(text=f"{pname}", callback_data=f'report_pick:{puid}')])
+    buttons.append([InlineKeyboardButton(text="Cancel", callback_data='back_to_profile')])
+    await cb.message.edit_text(
+        "Who do you want to report?",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data.startswith('report_pick:'))
+async def report_pick(cb: types.CallbackQuery, state: FSMContext):
+    target_uid = int(cb.data.split(':')[1])
+    await state.update_data(target_uid=target_uid)
+    tname = user_profiles.get(target_uid, {}).get('name', 'User')
+    await cb.message.edit_text(
+        f"Report: {tname}\n\nSelect a reason:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Inappropriate messages", callback_data='reason:harassment')],
+            [InlineKeyboardButton(text="Spam or fake profile", callback_data='reason:spam')],
+            [InlineKeyboardButton(text="Something else", callback_data='reason:other')],
+            [InlineKeyboardButton(text="Cancel", callback_data='report_user')],
+        ])
+    )
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data.startswith('reason:'))
+async def report_reason(cb: types.CallbackQuery, state: FSMContext):
+    reason_map = {'harassment': 'Inappropriate / Harassment', 'spam': 'Spam / Fake Profile', 'other': 'Other'}
+    reason_key = cb.data.split(':')[1]
+    reason_text = reason_map.get(reason_key, 'Unknown')
+    await state.update_data(reason=reason_text)
+    data = await state.get_data()
+    tname = user_profiles.get(data['target_uid'], {}).get('name', 'User')
+    await cb.message.edit_text(
+        f"Confirm Report\n\nUser: {tname}\nReason: {reason_text}\n\nSubmit this report?",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Submit", callback_data='report_confirm')],
+            [InlineKeyboardButton(text="Cancel", callback_data='back_to_profile')],
+        ])
+    )
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data == 'report_confirm')
+async def report_confirm(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    data = await state.get_data()
+    target_uid = data.get('target_uid')
+    reason = data.get('reason', 'Unknown')
+    if not target_uid:
+        await cb.message.edit_text("Something went wrong. Try again.", reply_markup=main_kb(uid))
+        await state.clear()
+        await cb.answer()
+        return
+    count = await add_report(target_uid, uid, reason)
+    tname = user_profiles.get(target_uid, {}).get('name', 'User')
+    banned = count >= REPORT_THRESHOLD
+    await send_admin(
+        f"New Report\n\nReported: {tname} (uid:{target_uid})\nReason: {reason}\nTotal: {count}/3\nReporter uid: {uid}"
+    )
+    if banned:
+        await send_admin(f"AUTO-BANNED: {tname} (uid:{target_uid}) reached {count} reports!")
+    await cb.message.edit_text(
+        f"Report submitted!{(' This user has been suspended.' if banned else '')}",
+        parse_mode='HTML', reply_markup=main_kb(uid)
+    )
+    await state.clear()
+    await cb.answer()
+
+# ─── Feedback ─────────────────────────────────────────────────────────────────
+
+@dp.callback_query(lambda cb: cb.data == 'send_feedback')
+async def feedback_start(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    if uid not in user_profiles:
+        await cb.message.edit_text("Set up your profile first via /start.")
+        await cb.answer()
+        return
+    await cb.message.edit_text(
+        "Send Feedback\n\nType your message, suggestion, or issue below:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Cancel", callback_data='back_to_profile')],
+        ])
+    )
+    await state.set_state(Feedback.message)
+    await cb.answer()
+
+@dp.message(StateFilter(Feedback.message))
+async def feedback_receive(message: types.Message, state: FSMContext):
+    uid = message.from_user.id
+    text = (message.text or '').strip()
+    if not text or len(text) < 5:
+        await message.answer("Message too short. Please provide more detail.")
+        return
+    await state.update_data(message=text)
+    await message.answer(
+        f"Confirm\n\n{text}\n\nSend this feedback?",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Send", callback_data='feedback_confirm')],
+            [InlineKeyboardButton(text="Edit", callback_data='feedback_edit')],
+            [InlineKeyboardButton(text="Cancel", callback_data='back_to_profile')],
+        ])
+    )
+
+@dp.callback_query(lambda cb: cb.data == 'feedback_edit')
+async def feedback_edit(cb: types.CallbackQuery, state: FSMContext):
+    await cb.message.edit_text(
+        "Edit your feedback:",
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Cancel", callback_data='back_to_profile')],
+        ])
+    )
+    await state.set_state(Feedback.message)
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data == 'feedback_confirm')
+async def feedback_confirm(cb: types.CallbackQuery, state: FSMContext):
+    uid = cb.from_user.id
+    data = await state.get_data()
+    text = data.get('message', '')
+    uname = user_profiles.get(uid, {}).get('name', 'Unknown')
+    await send_admin(f"Feedback\n\nFrom: {uname} (uid:{uid})\n\n{text}")
+    await cb.message.edit_text(
+        "Feedback sent! Thank you!",
+        parse_mode='HTML', reply_markup=main_kb(uid)
+    )
+    await state.clear()
     await cb.answer()
 
 @dp.callback_query(lambda cb: cb.data.startswith('admin_approve:'))
@@ -3190,3 +3400,30 @@ async def on_startup(dispatcher: Dispatcher):
 
 if __name__ == '__main__':
     asyncio.run(on_startup(dp))
+
+# ─── /unban ───────────────────────────────────────────────────────────────────
+
+@dp.message(Command('unban'))
+async def cmd_unban(message: types.Message):
+    uid = message.from_user.id
+    if uid != ADMIN_CHAT_ID:
+        return
+    args = message.text.split(' ', 1)
+    if len(args) < 2:
+        await message.answer("Usage: /unban <uid>")
+        return
+    try:
+        target_uid = int(args[1].strip())
+    except ValueError:
+        await message.answer("Invalid UID. Usage: /unban <uid>")
+        return
+    try:
+        r = await get_redis()
+        removed = await r.srem('banned_users', str(target_uid))
+        if removed:
+            await r.delete(f'reports:{target_uid}')
+            await message.answer(f"Unbanned: {target_uid}")
+        else:
+            await message.answer(f"Not banned: {target_uid}")
+    except Exception as e:
+        await message.answer(f"Error: {e}")
