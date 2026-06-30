@@ -1495,6 +1495,13 @@ async def cmd_stop(message: types.Message):
     if partner:
         active_matches.get(uid, {}).pop(partner, None)
         active_matches.get(partner, {}).pop(uid, None)
+        # Prevent rematch: add each user to the other's rejected list
+        for u, p in ((uid, partner), (partner, uid)):
+            if p and p in user_profiles:
+                if 'rejected' not in user_profiles[u]:
+                    user_profiles[u]['rejected'] = []
+                if p not in user_profiles[u]['rejected']:
+                    user_profiles[u]['rejected'].append(p)
     await message.answer("🔚 <b>Chat ended.</b>\n\nWhat would you like to do next?",
             parse_mode='HTML', reply_markup=reengage_kb(uid))
 
@@ -1883,6 +1890,13 @@ async def end_chat(cb: types.CallbackQuery):
     # Clean up active_matches so they can rematch
     active_matches.get(uid, {}).pop(partner, None)
     active_matches.get(partner, {}).pop(uid, None)
+    # Prevent rematch: add each user to the other's rejected list
+    for u, p in ((uid, partner), (partner, uid)):
+        if p and p in user_profiles:
+            if 'rejected' not in user_profiles[u]:
+                user_profiles[u]['rejected'] = []
+            if p not in user_profiles[u]['rejected']:
+                user_profiles[u]['rejected'].append(p)
     await save_all()
     await cb.message.edit_text(
         "🔚 <b>Chat ended.</b>\n\nWhat would you like to do next?",
@@ -1988,6 +2002,16 @@ async def relay(message: types.Message, state: FSMContext):
                          InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                     ])
                 )
+                # Notify partner immediately — don't wait 10s for reconnect loop
+                pname = user_profiles.get(uid, {}).get('name', 'Someone')
+                try:
+                    await bot.send_message(pid,
+                        f"⏳ <b>{pname}</b> is on hold.\n\n"
+                        "They can still receive your messages. We'll notify you when they reconnect.",
+                        parse_mode='HTML'
+                    )
+                except:
+                    pass
                 if uid not in _reconnect_tasks:
                     _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
                 return
