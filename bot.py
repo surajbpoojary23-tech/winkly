@@ -1004,21 +1004,23 @@ async def safe_delete(chat_id: int, message_id: int):
 
 def main_kb(uid: int = None):
     is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
+    is_paid_premium = uid and is_premium(uid)
     rows = [
         [InlineKeyboardButton(text="✏️ Edit Profile", callback_data='edit_profile')],
         [InlineKeyboardButton(text="🔍 Find Matches", callback_data='do_match')],
     ]
-    if not is_female:
+    if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def reengage_kb(uid: int = None):
     is_female = uid and user_profiles.get(uid, {}).get('gender') == 'Female'
+    is_paid_premium = uid and is_premium(uid)
     rows = [
         [InlineKeyboardButton(text="🔍 Find New Match", callback_data='do_match'),
          InlineKeyboardButton(text="👤 My Profile", callback_data='back_to_profile')],
     ]
-    if not is_female:
+    if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
