@@ -82,7 +82,7 @@ ALL_COMMANDS = [
     BotCommand(command="find", description="Find matches"),
     BotCommand(command="stop", description="End current chat"),
     BotCommand(command="premium", description="View premium plans"),
-    BotCommand(command="refer", description="Refer friends for free premium"),
+    BotCommand(command="refer", description="Refer friends"),
 ]
 NO_PREMIUM_COMMANDS = [c for c in ALL_COMMANDS if c.command != 'premium']
 
