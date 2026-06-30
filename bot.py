@@ -1567,16 +1567,25 @@ async def cmd_refer(message: types.Message):
         return
     code = referral_code(uid)
     cnt = await referral_count(uid)
-    await message.answer(
-        f"\U0001f389 <b>Refer & Earn Free Premium!</b>\n\n"
-        f"Your code: <code>{code}</code>\n\n"
-        f"Share this bot with friends. When 3 of them complete their profile, "
-        f"you get <b>1 Day Free Premium!</b> \U0001f3c6\n\n"
-        f"Progress: {cnt}/3 referrals",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="\U0001f4e4 Share Bot", callback_data='share_bot')],
-        ])
-    )
+    is_vf = is_verified_female(uid)
+    if is_vf:
+        await message.answer(
+            f"\U0001f389 <b>Refer & Earn Free Premium!</b>\n\n"
+            f"Your code: <code>{code}</code>\n\n"
+            f"Share this bot with friends.",
+            parse_mode='HTML'
+        )
+    else:
+        await message.answer(
+            f"\U0001f389 <b>Refer & Earn Free Premium!</b>\n\n"
+            f"Your code: <code>{code}</code>\n\n"
+            f"Share this bot with friends. When 3 of them complete their profile, "
+            f"you get <b>1 Day Free Premium!</b> \U0001f3c6\n\n"
+            f"Progress: {cnt}/3 referrals",
+            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="\U0001f4e4 Share Bot", callback_data='share_bot')],
+            ])
+        )
 
 @dp.callback_query(lambda cb: cb.data == 'share_bot')
 async def share_bot(cb: types.CallbackQuery, state: FSMContext):
