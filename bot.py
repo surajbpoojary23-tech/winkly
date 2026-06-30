@@ -2024,7 +2024,7 @@ async def relay(message: types.Message, state: FSMContext):
     if (p_receiver and p_receiver.get('gender') in ('Male', 'Other')
             and not is_premium(pid) and not is_verified_female(pid)):
         received = p_receiver.get('received_texts', 0)
-        if received >= RECEIVE_LIMIT:
+        if not is_verified_female(uid) and received >= RECEIVE_LIMIT:
             # Reuse the existing "Text limit reached" bubble for the sender
             pname = user_profiles[uid].get('name', 'Someone')
             n = _quota_notif.get(uid)
