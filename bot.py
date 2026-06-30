@@ -97,18 +97,16 @@ async def hide_premium_cmd(uid: int):
         logger.warning(f"Failed to hide /premium for {uid}: {e}")
 
 PLAN_CATALOG = {
-    "trial_1d": {"name": "TEST 1 Day", "price": 1, "duration": 1},
-    "monthly": {"name": "Monthly", "price": 199, "duration": 30},
-    "quarterly": {"name": "3 Months", "price": 299, "duration": 90},
-    "half_year": {"name": "6 Months", "price": 499, "duration": 180},
-    "yearly": {"name": "1 Year", "price": 699, "duration": 365},
+    "trial_1d": {"name": "1 Day", "price": 49, "duration": 1},
+    "weekly":   {"name": "1 Week", "price": 99, "duration": 7},
+    "biweekly": {"name": "2 Weeks", "price": 149, "duration": 14},
+    "monthly":  {"name": "1 Month", "price": 199, "duration": 30},
 }
 LONG_PLANS = [
     {"id": "trial_1d", **PLAN_CATALOG["trial_1d"]},
-    {"id": "monthly", **PLAN_CATALOG["monthly"]},
-    {"id": "quarterly", **PLAN_CATALOG["quarterly"]},
-    {"id": "half_year", **PLAN_CATALOG["half_year"]},
-    {"id": "yearly", **PLAN_CATALOG["yearly"]},
+    {"id": "weekly",   **PLAN_CATALOG["weekly"]},
+    {"id": "biweekly", **PLAN_CATALOG["biweekly"]},
+    {"id": "monthly",  **PLAN_CATALOG["monthly"]},
 ]
 
 bot = Bot(token=BOT_TOKEN)
@@ -1553,7 +1551,7 @@ async def cmd_premium(message: types.Message):
     await message.answer(
         f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')],
+            [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day')],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
         ])
     )
@@ -1839,7 +1837,7 @@ async def say_hi(cb: types.CallbackQuery):
             await cb.message.edit_text(
                 "⏸️ <b>Text limit reached</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day'),
+                    [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
@@ -2000,7 +1998,7 @@ async def relay(message: types.Message, state: FSMContext):
                 await message.answer(
                     base,
                     parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day'),
+                        [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day'),
                          InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                     ])
                 )
@@ -2031,7 +2029,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day'),
+                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day'),
                  InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -2057,7 +2055,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = f"📬 <b>{pname}</b> sent {count} message{'s' if count > 1 else ''}. Upgrade to read and reply."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -2120,11 +2118,11 @@ async def prem_1(cb: types.CallbackQuery):
         await cb.answer("Payment failed", show_alert=True)
         return
     await cb.message.edit_text(
-        "🌟 <b>1 Day Unlimited — ₹1</b>\n\n"
+        "🌟 <b>1 Day Unlimited — ₹49</b>\n\n"
         "Chat freely with your match. No limits for 24 hours.\n\n"
         "Tap below to complete payment:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Pay ₹1 — Activate Now", url=url)],
+            [InlineKeyboardButton(text="💳 Pay ₹49 — Activate Now", url=url)],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
         ])
@@ -2135,17 +2133,33 @@ async def prem_1(cb: types.CallbackQuery):
 async def prem_plans(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
-    rows = [[InlineKeyboardButton(
-        text=f"\U0001f3c6 {p['name']} — Rs{p['price']} (Save {int((1 - p['price']/(49*p['duration']))*100)}%)",
-        callback_data=f"premium_select:{p['id']}"
-    )] for p in LONG_PLANS]
-    rows.append([InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')])
+    plan_rows = [
+        ("1 Day",    49,  1,  "\xf0\x9f\x8f\xa0"),
+        ("1 Week",   99,  7,  "\xe2\x9c\x85 Best Value"),
+        ("2 Weeks",  149, 14, ""),
+        ("1 Month",  199, 30, "\xe2\x9c\x85 Popular"),
+    ]
+    rows = []
+    for name, price, days, badge in plan_rows:
+        per_day = round(price / days)
+        saving = max(0, int(round((1 - price / (49 * days)) * 100)))
+        badge_txt = badge + " " if badge else ""
+        saving_txt = f" (Save {saving}%)" if saving > 0 else ""
+        row_text = f"{badge_txt}\U0001f3c6 {name} \xe2\x80\x94 \xe2\x82\xb9{price} \xe2\x80\xa2 Rs{per_day}/day{saving_txt}"
+        plan_id = ("trial_1d" if name == "1 Day" else
+                   "weekly"   if name == "1 Week"  else
+                   "biweekly" if name == "2 Weeks" else
+                   "monthly")
+        rows.append([InlineKeyboardButton(text=row_text, callback_data=f"premium_select:{plan_id}")])
     rows.append([InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='back_to_premium')])
     await cb.message.edit_text(
-        "\U0001f3c6 <b>Premium Plans</b>\n\n" +
-        "\n".join(f"• {p['name']} — Rs{p['price']} (~Rs{round(p['price']/p['duration'])}/day, "
-                   f"Save {int((1-p['price']/(49*p['duration']))*100)}%)" for p in LONG_PLANS) +
-        "\n\nOr get 1 day for just ₹49.",
+        "\U0001f3c6 <b>Unlimited Premium Plans</b>\n\n"
+        "\U0001f44d All plans include unlimited texts & matches\n\n"
+        "\xe2\x9c\x85 1 Day    \xe2\x80\x94 \xe2\x82\xb949  \xe2\x80\xa2 Rs49/day\n"
+        "\xe2\x9c\x85 1 Week   \xe2\x80\x94 \xe2\x82\xb999  \xe2\x80\xa2 Rs14/day (Save 71%)\n"
+        "\xe2\x9c\x85 2 Weeks \xe2\x80\x94 \xe2\x82\xb9149 \xe2\x80\xa2 Rs11/day (Save 78%)\n"
+        "\xe2\x9c\x85 1 Month  \xe2\x80\x94 \xe2\x82\xb9199 \xe2\x80\xa2 Rs7/day  (Save 86%)\n\n"
+        "\xf0\x9f\x8f\xa0 <b>Save up to 86%</b> with longer plans!",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
     await cb.answer()
@@ -2160,29 +2174,29 @@ async def prem_sel(cb: types.CallbackQuery):
         await cb.answer("Invalid plan.", show_alert=True)
         return
     name, price, dur = plan['name'], int(plan['price']), int(plan['duration'])
-    await cb.message.edit_text(f"\u23f3 Creating payment link for <b>{name}</b>...")
+    await cb.message.edit_text(f"\U0001f3c6 Preparing your <b>{name} Premium</b>...")
     url = await make_payment_link(uid, plan_id)
     if not url:
         await cb.message.edit_text(
-            "⚠️ Couldn't create payment link. Please try again later.",
+            "\xe2\x9a\xa0\xef\xb8\x8f Couldn't create payment link. Please try again later.",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='premium_plans')],
             ])
         )
         await cb.answer("Payment failed", show_alert=True)
         return
+    day_word = "s" if dur > 1 else ""
     await cb.message.edit_text(
-        f"\U0001f3c6 <b>{name} Premium — Rs{price}</b>\n\n"
-        f"\u2705 Unlimited texts and matches for {dur} days\n\n"
-        "Tap below to complete payment:",
+        f"\U0001f3c6 <b>{name} Premium</b>\n\n"
+        f"\U0001f4ac Unlimited texts & matches for <b>{dur} day{day_word}</b>\n\n"
+        f"\U0001f4b0 Total: <b>\xe2\x82\xb9{price}</b>\n\n"
+        "\U0001f4b3 Tap below to pay & activate instantly:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"\U0001f4b3 Pay Rs{price}", url=url)],
-            [InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='premium_plans')],
+            [InlineKeyboardButton(text=f"\U0001f4b3 Pay \xe2\x82\xb9{price}", url=url)],
+            [InlineKeyboardButton(text="\u25c0\ufe0f Back to Plans", callback_data='premium_plans')],
         ])
     )
-    await cb.answer()
-
-@dp.callback_query(lambda cb: cb.data == 'back_to_premium')
+    await cb.answer()@dp.callback_query(lambda cb: cb.data == 'back_to_premium')
 async def back_prem(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
@@ -2194,7 +2208,7 @@ async def back_prem(cb: types.CallbackQuery):
         await cb.message.edit_text(
             f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹1", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
         )
