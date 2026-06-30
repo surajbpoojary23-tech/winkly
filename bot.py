@@ -311,6 +311,7 @@ _queue_msg_ids: Dict[int, int] = {}
 _processed_payments: Set[str] = set()
 _payment_link_map: Dict[str, dict] = {}  # payment_link_id -> server-side pending payment metadata
 _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
+_partner_notified_on_hold: set[int] = set()  # uid → partner already notified of on-hold
 _reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
 _quota_locks: Dict[int, asyncio.Lock] = {}
 # In-memory cache for has_text_quota — avoids Redis on every message
@@ -757,6 +758,7 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
                     )
                 except:
                     pass
+                _partner_notified_on_hold.discard(a_uid)
                 return
 
         # All 18 attempts failed → notify partner with options
@@ -2002,16 +2004,18 @@ async def relay(message: types.Message, state: FSMContext):
                          InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                     ])
                 )
-                # Notify partner immediately — don't wait 10s for reconnect loop
-                pname = user_profiles.get(uid, {}).get('name', 'Someone')
-                try:
-                    await bot.send_message(pid,
-                        f"⏳ <b>{pname}</b> is on hold.\n\n"
-                        "They can still receive your messages. We'll notify you when they reconnect.",
-                        parse_mode='HTML'
-                    )
-                except:
-                    pass
+                # Notify partner immediately — once per on-hold episode
+                if uid not in _partner_notified_on_hold:
+                    _partner_notified_on_hold.add(uid)
+                    pname = user_profiles.get(uid, {}).get('name', 'Someone')
+                    try:
+                        await bot.send_message(pid,
+                            f"⏳ <b>{pname}</b> is on hold.\n\n"
+                            "They can still receive your messages. We'll notify you when they reconnect.",
+                            parse_mode='HTML'
+                        )
+                    except:
+                        pass
                 if uid not in _reconnect_tasks:
                     _reconnect_tasks[uid] = asyncio.create_task(_reconnect_loop(uid, pid))
                 return
