@@ -2621,7 +2621,13 @@ async def edit_location_h(message: types.Message, state: FSMContext):
     lat, lon = loc.latitude, loc.longitude
     user_profiles[uid]['lat'] = str(lat)
     user_profiles[uid]['lon'] = str(lon)
-    user_profiles[uid]['location_name'] = 'GPS' if message.location else text
+    if message.location:
+        loc_name = await reverse_geocode(lat, lon)
+        if not loc_name:
+            loc_name = f"{lat:.4f}, {lon:.4f}"
+        user_profiles[uid]['location_name'] = loc_name
+    else:
+        user_profiles[uid]['location_name'] = text
     await save_all()
     await state.clear()
     await message.answer("✅ Location updated!", reply_markup=ReplyKeyboardRemove())
