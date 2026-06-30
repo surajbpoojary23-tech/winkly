@@ -1055,8 +1055,6 @@ def main_kb(uid: int = None):
     ]
     if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
-    rows.append([InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')])
-    rows.append([InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def reengage_kb(uid: int = None):
@@ -1068,8 +1066,6 @@ def reengage_kb(uid: int = None):
     ]
     if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
-    rows.append([InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')])
-    rows.append([InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def edit_profile_kb():
@@ -1080,6 +1076,15 @@ def edit_profile_kb():
         [InlineKeyboardButton(text="📍 Update Location", callback_data='edit_location')],
         [InlineKeyboardButton(text="← Back", callback_data='back_to_profile')],
     ])
+
+def stop_chat_kb(uid: int = None):
+    rows = [
+        [InlineKeyboardButton(text="🔍 Find New Match", callback_data='do_match')],
+        [InlineKeyboardButton(text="👤 My Profile", callback_data='back_to_profile')],
+        [InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')],
+        [InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def profile_text(p: dict) -> str:
     vb = " VERIFIED" if p.get('verified') else ""
@@ -1556,7 +1561,7 @@ async def cmd_stop(message: types.Message):
                 if p not in user_profiles[u]['rejected']:
                     user_profiles[u]['rejected'].append(p)
     await message.answer("🔚 <b>Chat ended.</b>\n\nWhat would you like to do next?",
-            parse_mode='HTML', reply_markup=reengage_kb(uid))
+            parse_mode='HTML', reply_markup=stop_chat_kb(uid))
 
 # ─── /verify ────────────────────────────────────────────────────────────────
 
