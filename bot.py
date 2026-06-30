@@ -1057,8 +1057,6 @@ def main_kb(uid: int = None):
     ]
     if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
-    rows.append([InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')])
-    rows.append([InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def reengage_kb(uid: int = None):
@@ -1070,8 +1068,6 @@ def reengage_kb(uid: int = None):
     ]
     if not is_female and not is_paid_premium:
         rows.append([InlineKeyboardButton(text="🌟 Premium", callback_data='see_premium')])
-    rows.append([InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')])
-    rows.append([InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def edit_profile_kb():
