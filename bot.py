@@ -1833,7 +1833,7 @@ async def say_hi(cb: types.CallbackQuery):
         await save_all()
         await cb.answer("This chat is no longer active.", show_alert=True)
         return
-    if not await reserve_text_quota(uid):
+    if not is_verified_female(uid) and not await reserve_text_quota(uid):
             await cb.message.edit_text(
                 "⏸️ <b>Text limit reached</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1993,7 +1993,7 @@ async def relay(message: types.Message, state: FSMContext):
         await save_all()
         await message.answer("This chat is no longer active.")
         return
-    if not await has_text_quota(uid):
+    if not is_verified_female(uid) and not await has_text_quota(uid):
                 base = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages. Upgrade to keep chatting or find a new match."
                 await message.answer(
                     base,
@@ -2070,7 +2070,7 @@ async def relay(message: types.Message, state: FSMContext):
                 _quota_notif[pid] = {'mid': msg.message_id, 'count': count}
             await save_all()
             return
-        if not await reserve_text_quota(uid):
+        if not is_verified_female(uid) and not await reserve_text_quota(uid):
             await message.answer(
                 "Text limit reached. Upgrade to keep chatting.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
