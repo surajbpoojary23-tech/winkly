@@ -83,6 +83,8 @@ ALL_COMMANDS = [
     BotCommand(command="stop", description="End current chat"),
     BotCommand(command="premium", description="View premium plans"),
     BotCommand(command="refer", description="Refer friends"),
+    BotCommand(command="report", description="Report a user"),
+    BotCommand(command="feedback", description="Send feedback"),
 ]
 NO_PREMIUM_COMMANDS = [c for c in ALL_COMMANDS if c.command != 'premium']
 
@@ -1083,10 +1085,8 @@ def edit_profile_kb():
 
 def stop_chat_kb(uid: int = None):
     rows = [
-        [InlineKeyboardButton(text="🔍 Find New Match", callback_data='do_match')],
-        [InlineKeyboardButton(text="👤 My Profile", callback_data='back_to_profile')],
-        [InlineKeyboardButton(text="🚩 Report User", callback_data='report_user')],
-        [InlineKeyboardButton(text="💬 Send Feedback", callback_data='send_feedback')],
+        [InlineKeyboardButton(text="🔍 Find New Match", callback_data='do_match'),
+         InlineKeyboardButton(text="👤 My Profile", callback_data='back_to_profile')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1648,6 +1648,40 @@ async def cmd_refer(message: types.Message):
                 [InlineKeyboardButton(text="\U0001f4e4 Share Bot", callback_data='share_bot')],
             ])
         )
+
+@dp.message(Command('report'))
+async def cmd_report(message: types.Message):
+    uid = message.from_user.id
+    await mark_online(uid)
+    if uid not in user_profiles:
+        await message.answer("📝 Set up your profile first, then send /report")
+        return
+    partners = await get_chat_partners(uid)
+    if not partners:
+        await message.answer("🚫 No active chat to report from. Start a conversation first.")
+        return
+    rows = [[InlineKeyboardButton(
+        text=user_profiles[p].get('name', 'User'),
+        callback_data=f'report_pick:{p}'
+    )] for p in partners if p in user_profiles]
+    await message.answer(
+        "🚩 <b>Report a User</b>\n\nSelect the user you want to report:",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+
+@dp.message(Command('feedback'))
+async def cmd_feedback(message: types.Message):
+    uid = message.from_user.id
+    await mark_online(uid)
+    if uid not in user_profiles:
+        await message.answer("📝 Set up your profile first, then send /feedback")
+        return
+    await Feedback.message.set()
+    await message.answer(
+        "💬 <b>Send Feedback</b>\n\nType your message, suggestion, or issue below:",
+        parse_mode='HTML'
+    )
 
 @dp.callback_query(lambda cb: cb.data == 'share_bot')
 async def share_bot(cb: types.CallbackQuery, state: FSMContext):
