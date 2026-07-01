@@ -1651,7 +1651,9 @@ async def cmd_report(message: types.Message):
     await mark_online(uid)
     r = await get_redis()
     profile_key = f'winkly:fsm:{uid}:name'
-    if r is None or not await r.exists(profile_key):
+    exists = await r.exists(profile_key) if r else False
+    logger.info(f"cmd_report: uid={uid}, r={r}, exists={exists}")
+    if r is None or not exists:
         await message.answer("📝 Set up your profile first, then send /report")
         return
     partners = await get_chat_partners(uid)
@@ -1674,7 +1676,9 @@ async def cmd_feedback(message: types.Message):
     await mark_online(uid)
     r = await get_redis()
     profile_key = f'winkly:fsm:{uid}:name'
-    if r is None or not await r.exists(profile_key):
+    exists = await r.exists(profile_key) if r else False
+    logger.info(f"cmd_feedback: uid={uid}, r={r}, exists={exists}")
+    if r is None or not exists:
         await message.answer("📝 Set up your profile first, then send /feedback")
         return
     await Feedback.message.set()
