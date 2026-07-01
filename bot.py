@@ -1649,7 +1649,9 @@ async def cmd_refer(message: types.Message):
 async def cmd_report(message: types.Message):
     uid = message.from_user.id
     await mark_online(uid)
-    if uid not in user_profiles:
+    r = await get_redis()
+    profile_key = f'winkly:fsm:{uid}:name'
+    if r is None or not await r.exists(profile_key):
         await message.answer("📝 Set up your profile first, then send /report")
         return
     partners = await get_chat_partners(uid)
@@ -1670,7 +1672,9 @@ async def cmd_report(message: types.Message):
 async def cmd_feedback(message: types.Message):
     uid = message.from_user.id
     await mark_online(uid)
-    if uid not in user_profiles:
+    r = await get_redis()
+    profile_key = f'winkly:fsm:{uid}:name'
+    if r is None or not await r.exists(profile_key):
         await message.answer("📝 Set up your profile first, then send /feedback")
         return
     await Feedback.message.set()
