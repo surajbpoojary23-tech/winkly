@@ -1647,7 +1647,8 @@ async def cmd_refer(message: types.Message):
 
 @dp.message(Command('report'))
 async def cmd_report(message: types.Message):
-    uid = message.from_user.id; open("/tmp/dbg.txt","a").write(str(uid)+"R ")
+    uid = message.from_user.id
+    open("/tmp/dbg.txt","a").write(f"REP uid={uid} text={repr(message.text[:50])}\n")
     await mark_online(uid)
     r = await get_redis()
     profile_key = f'winkly:fsm:{uid}:name'
@@ -1669,6 +1670,13 @@ async def cmd_report(message: types.Message):
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
+
+# Debug: alternative test command using F.text prefix (not Command filter)
+@dp.message(F.text.startswith('/report'))
+async def cmd_report_alt(message: types.Message):
+    uid = message.from_user.id
+    open("/tmp/dbg.txt","a").write(f"REP_ALT uid={uid} text={repr(message.text[:50])}\n")
+    await message.answer(f"[DEBUG] cmd_report_alt hit! text={repr(message.text[:50])}")
 
 @dp.message(Command('feedback'))
 async def cmd_feedback(message: types.Message):
@@ -2290,16 +2298,25 @@ async def relay(message: types.Message, state: FSMContext):
     if (p_receiver and p_receiver.get('gender') in ('Male', 'Other')
             and not is_premium(pid) and not is_verified_female(pid)):
         received = p_receiver.get('received_texts', 0)
-        if not is_verified_female(uid) and received >= RECEIVE_LIMIT:
-            # Reuse the existing "Text limit reached" bubble for the sender
-            pname = user_profiles[uid].get('name', 'Someone')
+        if received >= RECEIVE_LIMIT:
+            # Receiver hit their receive limit — notify the sender accordingly
+            sender_gender = user_profiles.get(uid, {}).get('gender', 'Other')
+            is_female_sender = (sender_gender == 'Female')
             n = _quota_notif.get(uid)
             count = (n['count'] + 1) if n else 1
-            text = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages."
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day'),
-                 InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
-            ])
+            if is_female_sender:
+                # Female sender: neutral message, no premium buttons
+                text = "⏸️ <b>Not available</b>\n\nThis person can't receive messages right now."
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Find Another Match", callback_data='do_match')],
+                ])
+            else:
+                # Male/Other sender: premium upsell
+                text = "⏸️ <b>Account on hold</b>\n\nThis person can't receive messages right now."
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day'),
+                     InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
+                ])
             if n:
                 try:
                     await bot.edit_message_text(text, uid, n['mid'], parse_mode='HTML', reply_markup=kb)
