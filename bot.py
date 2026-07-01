@@ -1671,12 +1671,17 @@ async def cmd_report(message: types.Message):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
 
-# Debug: alternative test command using F.text prefix (not Command filter)
-@dp.message(F.text.startswith('/report'))
+# Debug: alternative test command - handles both /report and /report@BotUsername
+@dp.message(F.text.lower().startswith('/report'))
 async def cmd_report_alt(message: types.Message):
     uid = message.from_user.id
-    open("/tmp/dbg.txt","a").write(f"REP_ALT uid={uid} text={repr(message.text[:50])}\n")
-    await message.answer(f"[DEBUG] cmd_report_alt hit! text={repr(message.text[:50])}")
+    open("/tmp/dbg.txt","a").write(f"REP_ALT uid={uid} text={repr(message.text[:80])}\n")
+    await message.answer(f"[DEBUG] cmd_report_alt hit! text={repr(message.text[:80])}")
+
+# Debug: unique test command to verify Command() filter works
+@dp.message(Command('testreport'))
+async def cmd_test_report(message: types.Message):
+    await message.answer(f"[DEBUG] /testreport works! text={repr(message.text[:80])}")
 
 @dp.message(Command('feedback'))
 async def cmd_feedback(message: types.Message):
