@@ -3253,6 +3253,8 @@ async def on_startup(dispatcher: Dispatcher):
             return web.Response(text='OK', status=200)
         app.router.add_get('/health', health)
         app.router.add_post('/health', health)
+        app.router.add_get('/debug', debug)
+        app.router.add_get('/fsm_check', fsm_check)
 
         async def razorpay_status(request):
             status = {
