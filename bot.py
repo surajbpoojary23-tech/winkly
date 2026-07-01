@@ -1647,7 +1647,7 @@ async def cmd_refer(message: types.Message):
 
 @dp.message(Command('report'))
 async def cmd_report(message: types.Message):
-    uid = message.from_user.id
+    uid = message.from_user.id; open("/tmp/dbg.txt","a").write(str(uid)+"R ")
     await mark_online(uid)
     r = await get_redis()
     profile_key = f'winkly:fsm:{uid}:name'
@@ -1672,7 +1672,7 @@ async def cmd_report(message: types.Message):
 
 @dp.message(Command('feedback'))
 async def cmd_feedback(message: types.Message):
-    uid = message.from_user.id
+    uid = message.from_user.id; open("/tmp/dbg.txt","a").write(str(uid)+"F ")
     await mark_online(uid)
     r = await get_redis()
     profile_key = f'winkly:fsm:{uid}:name'
