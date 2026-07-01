@@ -1705,19 +1705,24 @@ async def cmd_test_report(message: types.Message):
 async def cmd_feedback(message: types.Message):
     uid = message.from_user.id
     await mark_online(uid)
-    # Check profile: use user_profiles dict (loaded at startup) OR Redis FSM key as fallback
+    # Check profile: user_profiles dict first (loaded at startup from Redis)
     has_profile = uid in user_profiles
     if not has_profile:
+        # Fallback: check Redis FSM key directly
         r = await get_redis()
         if r:
             profile_key = f'winkly:fsm:{uid}:name'
-            has_profile = await r.exists(profile_key)
+            has_profile = bool(await r.exists(profile_key))
+            logger.info(f"cmd_feedback Redis check: uid={uid}, profile_key={profile_key}, exists={has_profile}")
+        else:
+            logger.warning(f"cmd_feedback: get_redis() returned None for uid={uid}")
+    logger.info(f"cmd_feedback: uid={uid}, has_profile={has_profile}")
     if not has_profile:
         await message.answer("📝 Set up your profile first via /start.")
         return
     try:
         await Feedback.message.set()
-        logger.info(f"cmd_feedback: uid={uid}, state set to Feedback.message")
+        logger.info(f"cmd_feedback: state set to Feedback.message")
     except Exception as e:
         logger.error(f"cmd_feedback state set error: {e}")
         await message.answer("⚠️ Something went wrong, try again.")
