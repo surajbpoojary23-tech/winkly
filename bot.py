@@ -3253,8 +3253,6 @@ async def on_startup(dispatcher: Dispatcher):
             return web.Response(text='OK', status=200)
         app.router.add_get('/health', health)
         app.router.add_post('/health', health)
-        app.router.add_get('/debug', debug)
-        app.router.add_get('/fsm_check', fsm_check)
 
         async def razorpay_status(request):
             status = {
@@ -3415,6 +3413,9 @@ async def on_startup(dispatcher: Dispatcher):
             r2 = await get_redis()
             profiles_val = await r2.get('winkly:profiles') if r2 else None
             return web.json_response({'data': data, 'prof': prof, 'saved': profiles_val})
+        app.router.add_get('/debug', debug)
+        app.router.add_get('/fsm_check', fsm_check)
+
         app.router.add_post('/razorpay/webhook', handle_razorpay_webhook)
         app.router.add_get('/payment/success', payment_success_page)
         handler.register(app, path=TELEGRAM_WEBHOOK_PATH)
