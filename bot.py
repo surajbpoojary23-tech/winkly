@@ -2410,7 +2410,7 @@ async def prem_plans(cb: types.CallbackQuery):
         rows.append([InlineKeyboardButton(text=row_text, callback_data=f"premium_select:{plan_id}")])
     rows.append([InlineKeyboardButton(text="◀️ Back", callback_data='back_to_premium')])
     await cb.message.edit_text(
-        "<b>Unlimited Premium Plans</b>\n\nAll plans include unlimited texts & matches\n\nSelect a plan:",
+        "<b>Unlimited Premium Plans</b>\n\n50% off - Limited time only!\n\nAll plans include unlimited texts & matches\n\nSelect a plan:",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
     await cb.answer()
