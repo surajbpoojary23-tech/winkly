@@ -1195,7 +1195,7 @@ async def h_gender(message: types.Message, state: FSMContext):
         await message.answer("\u26a0\ufe0f Please tap a button above.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
             [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
-            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+            [InlineKeyboardButton(text="🧑 Other", callback_data="signup_gender:Other")],
         ]))
         return
     await state.update_data(gender=GENDER_KW[keyword])
@@ -1488,7 +1488,7 @@ async def h_dob(message: types.Message, state: FSMContext):
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
             [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
-            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+            [InlineKeyboardButton(text="🧑 Other", callback_data="signup_gender:Other")],
         ])
     )
     await state.update_data(prev_bot_msg=msg.message_id)
@@ -1609,7 +1609,7 @@ async def cmd_premium(message: types.Message):
     await message.answer(
         f"🏆 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day')],
+            [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day')],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
         ])
     )
@@ -2097,7 +2097,7 @@ async def say_hi(cb: types.CallbackQuery):
             await cb.message.edit_text(
                 "⏸️ <b>Text limit reached</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day'),
+                    [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
@@ -2258,7 +2258,7 @@ async def relay(message: types.Message, state: FSMContext):
                 await message.answer(
                     base,
                     parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day'),
+                        [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day'),
                          InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                     ])
                 )
@@ -2289,7 +2289,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day'),
+                [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day'),
                  InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -2315,7 +2315,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = f"📬 <b>{pname}</b> sent {count} message{'s' if count > 1 else ''}. Upgrade to read and reply."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -2447,7 +2447,9 @@ async def prem_sel(cb: types.CallbackQuery):
             [InlineKeyboardButton(text="◀️ Back to Plans", callback_data='premium_plans')],
         ])
     )
-    await cb.answer()@dp.callback_query(lambda cb: cb.data == 'back_to_premium')
+    await cb.answer()
+
+@dp.callback_query(lambda cb: cb.data == 'back_to_premium')
 async def back_prem(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
@@ -2459,7 +2461,7 @@ async def back_prem(cb: types.CallbackQuery):
         await cb.message.edit_text(
             f"🏆 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="1 day plan at just Rs49", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
         )
@@ -2611,7 +2613,7 @@ async def cb_signup_dob(cb: types.CallbackQuery, state: FSMContext):
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨 Male", callback_data="signup_gender:Male")],
             [InlineKeyboardButton(text="👩 Female", callback_data="signup_gender:Female")],
-            [InlineKeyboardButton(text="⚕ Other", callback_data="signup_gender:Other")],
+            [InlineKeyboardButton(text="🧑 Other", callback_data="signup_gender:Other")],
         ])
     )
     await cb.answer()
