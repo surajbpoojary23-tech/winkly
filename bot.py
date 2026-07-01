@@ -1702,7 +1702,7 @@ async def cmd_test_report(message: types.Message):
     await message.answer(f"[DEBUG] /testreport works! text={repr(message.text[:80])}")
 
 @dp.message(Command('feedback'))
-async def cmd_feedback(message: types.Message):
+async def cmd_feedback(message: types.Message, state: FSMContext):
     uid = message.from_user.id
     await mark_online(uid)
     has_profile = uid in user_profiles
@@ -1711,22 +1711,22 @@ async def cmd_feedback(message: types.Message):
         if r:
             profile_key = f'winkly:fsm:{uid}:name'
             has_profile = bool(await r.exists(profile_key))
-            logger.info(f'cmd_feedback Redis check: uid={uid}, exists={has_profile}')
+            logger.info(f"cmd_feedback Redis check: uid={uid}, exists={has_profile}")
         else:
-            logger.warning(f'cmd_feedback: get_redis() returned None for uid={uid}')
-    logger.info(f'cmd_feedback: uid={uid}, has_profile={has_profile}')
+            logger.warning(f"cmd_feedback: get_redis() returned None for uid={uid}")
+    logger.info(f"cmd_feedback: uid={uid}, has_profile={has_profile}")
     if not has_profile:
-        await message.answer('Set up your profile first via /start.')
+        await message.answer("📝 Set up your profile first via /start.")
         return
     try:
-        await Feedback.message.set()
-        logger.info('cmd_feedback: state set to Feedback.message')
+        await state.set_state(Feedback.message)
+        logger.info("cmd_feedback: state set to Feedback.message")
     except Exception as e:
-        logger.error(f'cmd_feedback state set error: type={type(e).__name__} args={e.args}')
-        await message.answer(f'Error ({type(e).__name__}), try again.')
+        logger.error(f"cmd_feedback state set error: type={type(e).__name__} args={e.args}")
+        await message.answer(f"⚠️ Error ({type(e).__name__}), try again.")
         return
     await message.answer(
-        '💬 <b>Send Feedback</b>\n\nType your message below:',
+        "💬 <b>Send Feedback</b>\n\nType your message below:",
         parse_mode='HTML'
     )
 
