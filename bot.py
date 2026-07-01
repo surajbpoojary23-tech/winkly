@@ -112,7 +112,7 @@ LONG_PLANS = [
 ]
 
 bot = Bot(token=BOT_TOKEN)
-# RedisStorage created at module load (sync, no connection check — connection checked at first use)
+# RedisStorage created at module load (sync, no connection check &mdash; connection checked at first use)
 # Falls back to MemoryStorage if REDIS_URL is missing/invalid
 _redis_client_for_fsm = redis.from_url(REDIS_URL, decode_responses=True) if REDIS_URL else None
 if _redis_client_for_fsm:
@@ -187,7 +187,7 @@ async def init_storage():
             if raw:
                 try:
                     val = json.loads(raw)
-                    # All dicts use integer uid keys — convert from Redis string keys
+                    # All dicts use integer uid keys &mdash; convert from Redis string keys
                     val = {int(k): v for k, v in val.items()}
                     dest.update(val)
                 except Exception as e:
@@ -314,7 +314,7 @@ _quota_notif: Dict[int, dict] = {}  # uid -> {'mid': int, 'count': int}
 _partner_notified_on_hold: set[int] = set()  # uid → partner already notified of on-hold
 _reconnect_tasks: Dict[int, asyncio.Task] = {}  # hold_user_uid -> reconnect loop task
 _quota_locks: Dict[int, asyncio.Lock] = {}
-# In-memory cache for has_text_quota — avoids Redis on every message
+# In-memory cache for has_text_quota &mdash; avoids Redis on every message
 # Key = uid, Value = (remaining_int, expiry_time)
 _QUOTA_CACHE_TTL = 3.0  # seconds
 _quota_cache: Dict[int, tuple[int, float]] = {}
@@ -332,7 +332,7 @@ async def _get_client_ip(message: types.Message) -> str:
     try:
         em = message.effective_message
         if hasattr(em, 'forward_from') and em.forward_from:
-            # forwarded — use sender's IP indirectly via bot token
+            # forwarded &mdash; use sender's IP indirectly via bot token
             return str(message.from_user.id)
         # Try via Telegram's extract update source
         update = message.update if hasattr(message, 'update') else None
@@ -432,7 +432,7 @@ async def check_account_age(uid: int) -> tuple[bool, str]:
         return True, ""
     except Exception as e:
         logger.warning(f"Account age check failed for {uid}: {e}")
-        return True, ""  # fail-open — don't block legitimate users if API fails
+        return True, ""  # fail-open &mdash; don't block legitimate users if API fails
 
 
 class Signup(StatesGroup):
@@ -521,7 +521,7 @@ async def reverse_geocode(lat: float, lon: float) -> str:
                         return parts[1] if len(parts) > 1 else dn[:60]
     except Exception as e:
         logger.warning(f"Reverse geocode failed: {e}")
-    # Fallback: never return empty — always give coordinates string
+    # Fallback: never return empty &mdash; always give coordinates string
     return f"{lat:.4f}, {lon:.4f}"
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -608,7 +608,7 @@ def check_text_quota(uid: int) -> bool:
     return p.get('free_texts', 0) > 0
 
 def check_match_quota(uid: int) -> bool:
-    """Unlimited matching — no limit."""
+    """Unlimited matching &mdash; no limit."""
     return True
 
 def consume_text(uid: int):
@@ -704,15 +704,15 @@ def quota_summary(uid: int) -> str:
         exp_str = premium_subscriptions[uid].get('expiry_date', '')
         try:
             exp = datetime.fromisoformat(exp_str); days = (exp - datetime.now()).days
-            return f"🌟 Premium Active — Unlimited. Expires in {days} day{'s' if days != 1 else ''}"
-        except: return "🌟 Premium Active — Unlimited!"
+            return f"🌟 Premium Active &mdash; Unlimited. Expires in {days} day{'s' if days != 1 else ''}"
+        except: return "🌟 Premium Active &mdash; Unlimited!"
     if is_verified_female(uid):
-        return "✅ Verified Female — Unlimited free access, always."
+        return "✅ Verified Female &mdash; Unlimited free access, always."
     p = user_profiles.get(uid, {})
     ft = p.get('free_texts', 0)
     if ft > 0:
-        return f"✉️ {ft} free message{'s' if ft != 1 else ''} remaining — send more with Premium."
-    return "✉️ All free messages sent — 🌟 Upgrade for unlimited texts."
+        return f"✉️ {ft} free message{'s' if ft != 1 else ''} remaining &mdash; send more with Premium."
+    return "✉️ All free messages sent &mdash; 🌟 Upgrade for unlimited texts."
 
 def referral_code(uid: int) -> str:
     secret = BOT_TOKEN.encode()
@@ -778,7 +778,7 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
             if a_uid not in user_profiles:
                 return
             if is_premium(a_uid):
-                # Reconnected — notify BOTH sides
+                # Reconnected &mdash; notify BOTH sides
                 pname = user_profiles.get(a_uid, {}).get('name', 'Someone')
                 bname = user_profiles.get(b_uid, {}).get('name', 'Someone')
                 try:
@@ -794,7 +794,7 @@ async def _reconnect_loop(a_uid: int, b_uid: int):
                     await bot.send_message(
                         a_uid,
                         f"✅ You're back in the chat with <b>{bname}</b>!\n\n"
-                        f"Your premium is active — keep the conversation going.",
+                        f"Your premium is active &mdash; keep the conversation going.",
                         parse_mode='HTML',
                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                             [InlineKeyboardButton(text="💬 Resume Chat", callback_data=f'chat:{b_uid}')],
@@ -1100,7 +1100,7 @@ def profile_text(p: dict) -> str:
             loc = 'NO LOCATION'
     else:
         loc = 'NO LOCATION'
-    bio = p.get('bio') or '—'
+    bio = p.get('bio') or '&mdash;'
     age_str = ""
     dob_raw = p.get('dob')
     if dob_raw:
@@ -1154,7 +1154,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.update_data(last_bot_msg=None, prev_bot_msg=None)
     msg = await message.answer(
         "Hey there! 👋\n\n"
-        "I'm <b>Winkly</b> — your wingman on Telegram.\n\n"
+        "I'm <b>Winkly</b> &mdash; your wingman on Telegram.\n\n"
         "<b>What should we call you?</b>",
         parse_mode='HTML'
     )
@@ -1236,7 +1236,7 @@ async def h_preferred(message: types.Message, state: FSMContext):
     msg = await message.answer(
         "<b>Where should we look for matches?</b>\n\n"
         "Share your location or type a city/area name.\n\n"
-        "Don't worry — we only show your general area, not your exact address.",
+        "Don't worry &mdash; we only show your general area, not your exact address.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📍 Share My Location", callback_data="loc_share_gps")],
             [InlineKeyboardButton(text="⌨️ Type a Place", callback_data="loc_enter_text")],
@@ -1280,7 +1280,7 @@ async def h_loc_gps(message: types.Message, state: FSMContext):
     await message.answer("📍 Got it!", reply_markup=ReplyKeyboardRemove())
     msg = await message.answer(
         "<b>Almost done!</b>\n\n"
-        "📝 <b>Write a short bio</b> — or skip for now.\n\n"
+        "📝 <b>Write a short bio</b> &mdash; or skip for now.\n\n"
         "Something like: \"Coffee addict, weekend traveler, looking for a real connection.\"",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1303,7 +1303,7 @@ async def h_loc_text(message: types.Message, state: FSMContext):
     text = (message.text or '').strip()
     if not text:
         return
-    # Keyboard button placeholder — silently ignore
+    # Keyboard button placeholder &mdash; silently ignore
     if text in ('\U0001f4cd Share My Location', '\u2328\ufe0f  Enter Place Name', '\U0001f4cd Share Location', 'Enter Place Name'):
         return
     lat, lon = await geocode(text)
@@ -1328,7 +1328,7 @@ async def h_loc_text(message: types.Message, state: FSMContext):
     await message.answer("📍 Saved!", reply_markup=ReplyKeyboardRemove())
     msg = await message.answer(
         "<b>Almost done!</b>\n\n"
-        "📝 <b>Write a short bio</b> — or skip for now.\n\n"
+        "📝 <b>Write a short bio</b> &mdash; or skip for now.\n\n"
         "Something like: \"Coffee addict, weekend traveler, looking for a real connection.\"",
         parse_mode='HTML',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1372,7 +1372,7 @@ async def finish_signup(state: FSMContext, chat_id: int, uid: int):
         user_profiles[uid] = prof
         logger.info(f"finish_signup: user_profiles[{uid}] set, profiles_in_memory={len(user_profiles)}")
         logger.info(f"finish_signup: about to call get_redis()...")
-        # Direct atomic write — bypasses save_all() which may fail across workers
+        # Direct atomic write &mdash; bypasses save_all() which may fail across workers
         r = await get_redis()
         if r:
             try:
@@ -1598,18 +1598,18 @@ async def cmd_premium(message: types.Message):
             exp = datetime.fromisoformat(exp_str)
             days = (exp - datetime.now()).days
             await message.answer(
-                f"\U0001f3c6 <b>Premium Active!</b>\n\nExpires in {days} day{'s' if days != 1 else ''}\n"
+                f"🏆 <b>Premium Active!</b>\n\nExpires in {days} day{'s' if days != 1 else ''}\n"
                 "\u2705 Unlimited texts and matches\n\nWhat would you like to do?",
                 parse_mode='HTML', reply_markup=main_kb(uid)
             )
         except:
-            await message.answer("\U0001f3c6 <b>Premium Active!</b>\n\nUnlimited access!",
+            await message.answer("🏆 <b>Premium Active!</b>\n\nUnlimited access!",
                                  parse_mode='HTML', reply_markup=main_kb(uid))
         return
     await message.answer(
-        f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
+        f"🏆 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day')],
+            [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day')],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
         ])
     )
@@ -1638,7 +1638,7 @@ async def cmd_refer(message: types.Message):
             f"\U0001f389 <b>Refer & Earn Free Premium!</b>\n\n"
             f"Your code: <code>{code}</code>\n\n"
             f"Share this bot with friends. When 3 of them complete their profile, "
-            f"you get <b>1 Day Free Premium!</b> \U0001f3c6\n\n"
+            f"you get <b>1 Day Free Premium!</b> 🏆\n\n"
             f"Progress: {cnt}/3 referrals",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="\U0001f4e4 Share Bot", callback_data='share_bot')],
@@ -2022,7 +2022,7 @@ async def skip_match(cb: types.CallbackQuery):
     # Remove from active_matches if present
     active_matches.get(uid, {}).pop(pid, None)
     active_matches.get(pid, {}).pop(uid, None)
-    # Delete old match card (may be a photo — edit_text fails on media messages)
+    # Delete old match card (may be a photo &mdash; edit_text fails on media messages)
     await safe_delete(uid, cb.message.message_id)
     await bot.send_message(
         uid,
@@ -2057,19 +2057,19 @@ async def start_chat(cb: types.CallbackQuery, state: FSMContext):
     current_chat[pid] = uid
     await save_all()
     pname = user_profiles.get(pid, {}).get('name', 'Someone')
-    # Delete old match card (may be a photo — edit_text fails on media messages)
+    # Delete old match card (may be a photo &mdash; edit_text fails on media messages)
     await safe_delete(uid, cb.message.message_id)
-    # Send chat interface — user controls when to say hi
+    # Send chat interface &mdash; user controls when to say hi
     await bot.send_message(
         uid,
-        f"\U0001f4ac <b>Chat with {pname}</b>\n\n"
+        f"💬 <b>Chat with {pname}</b>\n\n"
         "Send your messages below. Tap <b>Say Hi</b> to introduce yourself!\n\n"
         "Use /stop to end the chat.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="\U0001f44b Say Hi", callback_data=f'say_hi:{pid}')],
         ])
     )
-    # Notify partner that someone started a chat — they will see your hi when you send it
+    # Notify partner that someone started a chat &mdash; they will see your hi when you send it
     try:
         await bot.send_message(
             pid,
@@ -2097,7 +2097,7 @@ async def say_hi(cb: types.CallbackQuery):
             await cb.message.edit_text(
                 "⏸️ <b>Text limit reached</b>\n\nYou've used all your free texts.",
                 parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day'),
+                    [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day'),
                      InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                 ])
             )
@@ -2167,14 +2167,14 @@ async def end_chat(cb: types.CallbackQuery):
 
 @dp.callback_query(lambda cb: cb.data == 'wait_hold')
 async def wait_hold(cb: types.CallbackQuery):
-    """Dismiss the 'account on hold' message (relay path — separate message)."""
+    """Dismiss the 'account on hold' message (relay path &mdash; separate message)."""
     await cb.message.delete()
     await cb.answer()
 
 
 @dp.callback_query(lambda cb: cb.data == 'wait_reconnect')
 async def wait_reconnect(cb: types.CallbackQuery):
-    """Partner clicked Wait — restart the reconnect loop."""
+    """Partner clicked Wait &mdash; restart the reconnect loop."""
     await cb.message.delete()
     await cb.answer()
     # Find the hold user's uid from current_chat
@@ -2188,7 +2188,7 @@ async def wait_reconnect(cb: types.CallbackQuery):
 
 @dp.callback_query(lambda cb: cb.data == 'end_reconnect')
 async def end_reconnect(cb: types.CallbackQuery):
-    """Partner clicked End Chat — end the chat for both."""
+    """Partner clicked End Chat &mdash; end the chat for both."""
     b_uid = cb.from_user.id
     await mark_online(b_uid)
     a_uid = current_chat.pop(b_uid, None)
@@ -2217,13 +2217,13 @@ async def end_reconnect(cb: types.CallbackQuery):
 
 @dp.callback_query(lambda cb: cb.data.startswith('wait_in_chat:'))
 async def wait_in_chat(cb: types.CallbackQuery):
-    """Restore chat interface after 'account on hold' (say_hi path — was edited in place)."""
+    """Restore chat interface after 'account on hold' (say_hi path &mdash; was edited in place)."""
     uid = cb.from_user.id
     await mark_online(uid)
     pid = int(cb.data.split(':', 1)[1])
     pname = user_profiles.get(pid, {}).get('name', 'Someone')
     await cb.message.edit_text(
-        f"\U0001f4ac <b>Chat with {pname}</b>\n\n"
+        f"💬 <b>Chat with {pname}</b>\n\n"
         "Send your messages below. Tap <b>Say Hi</b> to introduce yourself!\n\n"
         "Use /stop to end the chat.",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -2243,7 +2243,7 @@ async def relay(message: types.Message, state: FSMContext):
     if uid not in current_chat:
         return
     # If user is in any FSM state (editing profile, signup, verify),
-    # don't relay — the state-specific handler should process the message.
+    # don't relay &mdash; the state-specific handler should process the message.
     current_state = await state.get_state()
     if current_state is not None:
         return
@@ -2258,11 +2258,11 @@ async def relay(message: types.Message, state: FSMContext):
                 await message.answer(
                     base,
                     parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day'),
+                        [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day'),
                          InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
                     ])
                 )
-                # Notify partner immediately — once per on-hold episode
+                # Notify partner immediately &mdash; once per on-hold episode
                 if uid not in _partner_notified_on_hold:
                     _partner_notified_on_hold.add(uid)
                     pname = user_profiles.get(uid, {}).get('name', 'Someone')
@@ -2289,7 +2289,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = "⏸️ <b>Text limit reached</b>\n\nYou've used all your free messages."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day'),
+                [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day'),
                  InlineKeyboardButton(text="\U0001f4cb Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -2305,7 +2305,7 @@ async def relay(message: types.Message, state: FSMContext):
                 _quota_notif[uid] = {'mid': msg.message_id, 'count': count}
             await save_all()
             return
-    # Receiver can always receive messages — no quota check
+    # Receiver can always receive messages &mdash; no quota check
     reserved_text = False
     try:
         # If receiver has no quota, show notification instead of forwarding
@@ -2315,7 +2315,7 @@ async def relay(message: types.Message, state: FSMContext):
             count = (n['count'] + 1) if n else 1
             text = f"📬 <b>{pname}</b> sent {count} message{'s' if count > 1 else ''}. Upgrade to read and reply."
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
             if n:
@@ -2372,17 +2372,17 @@ async def prem_1(cb: types.CallbackQuery):
         await cb.message.edit_text(
             "⚠️ Couldn't create payment link. Please try again later.",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='back_to_premium')],
+                [InlineKeyboardButton(text="◀️ Back", callback_data='back_to_premium')],
             ])
         )
         await cb.answer("Payment failed", show_alert=True)
         return
     await cb.message.edit_text(
-        "🌟 <b>1 Day Unlimited — ₹49</b>\n\n"
+        "🌟 <b>1 Day Unlimited &mdash; Rs 49</b>\n\n"
         "Chat freely with your match. No limits for 24 hours.\n\n"
         "Tap below to complete payment:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Pay ₹49 — Activate Now", url=url)],
+            [InlineKeyboardButton(text="💳 Pay Rs 49 &mdash; Activate Now", url=url)],
             [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             [InlineKeyboardButton(text="\U0001f464 View Profile", callback_data='back_to_profile')],
         ])
@@ -2394,10 +2394,10 @@ async def prem_plans(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
     plan_rows = [
-        ("1 Day",    49,  1,  "\xf0\x9f\x8f\xa0"),
-        ("1 Week",   99,  7,  "\xe2\x9c\x85 Best Value"),
+        ("1 Day",    49,  1,  "🛡️"),
+        ("1 Week",   99,  7,  "✅ Best Value"),
         ("2 Weeks",  149, 14, ""),
-        ("1 Month",  199, 30, "\xe2\x9c\x85 Popular"),
+        ("1 Month",  199, 30, "✅ Popular"),
     ]
     rows = []
     for name, price, days, badge in plan_rows:
@@ -2405,21 +2405,21 @@ async def prem_plans(cb: types.CallbackQuery):
         saving = max(0, int(round((1 - price / (49 * days)) * 100)))
         badge_txt = badge + " " if badge else ""
         saving_txt = f" (Save {saving}%)" if saving > 0 else ""
-        row_text = f"{badge_txt}\U0001f3c6 {name} \xe2\x80\x94 \xe2\x82\xb9{price} \xe2\x80\xa2 Rs{per_day}/day{saving_txt}"
+        row_text = f"{badge_txt}🏆 {name}  —  Rs {price}  -  Rs{per_day}/day{saving_txt}"
         plan_id = ("trial_1d" if name == "1 Day" else
                    "weekly"   if name == "1 Week"  else
                    "biweekly" if name == "2 Weeks" else
                    "monthly")
         rows.append([InlineKeyboardButton(text=row_text, callback_data=f"premium_select:{plan_id}")])
-    rows.append([InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='back_to_premium')])
+    rows.append([InlineKeyboardButton(text="◀️ Back", callback_data='back_to_premium')])
     await cb.message.edit_text(
-        "\U0001f3c6 <b>Unlimited Premium Plans</b>\n\n"
-        "\U0001f44d All plans include unlimited texts & matches\n\n"
-        "\xe2\x9c\x85 1 Day    \xe2\x80\x94 \xe2\x82\xb949  \xe2\x80\xa2 Rs49/day\n"
-        "\xe2\x9c\x85 1 Week   \xe2\x80\x94 \xe2\x82\xb999  \xe2\x80\xa2 Rs14/day (Save 71%)\n"
-        "\xe2\x9c\x85 2 Weeks \xe2\x80\x94 \xe2\x82\xb9149 \xe2\x80\xa2 Rs11/day (Save 78%)\n"
-        "\xe2\x9c\x85 1 Month  \xe2\x80\x94 \xe2\x82\xb9199 \xe2\x80\xa2 Rs7/day  (Save 86%)\n\n"
-        "\xf0\x9f\x8f\xa0 <b>Save up to 86%</b> with longer plans!",
+        "🏆 <b>Unlimited Premium Plans</b>\n\n"
+        "👍 All plans include unlimited texts & matches\n\n"
+        "✅ 1 Day     —  Rs 49   -  Rs49/day\n"
+        "✅ 1 Week    —  Rs 99   -  Rs14/day (Save 71%)\n"
+        "✅ 2 Weeks  —  Rs 149  -  Rs11/day (Save 78%)\n"
+        "✅ 1 Month   —  Rs 199  -  Rs7/day  (Save 86%)\n\n"
+        "🛡️ <b>Save up to 86%</b> with longer plans!",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
     await cb.answer()
@@ -2434,26 +2434,26 @@ async def prem_sel(cb: types.CallbackQuery):
         await cb.answer("Invalid plan.", show_alert=True)
         return
     name, price, dur = plan['name'], int(plan['price']), int(plan['duration'])
-    await cb.message.edit_text(f"\U0001f3c6 Preparing your <b>{name} Premium</b>...")
+    await cb.message.edit_text(f"🏆 Preparing your <b>{name} Premium</b>...")
     url = await make_payment_link(uid, plan_id)
     if not url:
         await cb.message.edit_text(
-            "\xe2\x9a\xa0\xef\xb8\x8f Couldn't create payment link. Please try again later.",
+            "⚠️ Couldn't create payment link. Please try again later.",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data='premium_plans')],
+                [InlineKeyboardButton(text="◀️ Back", callback_data='premium_plans')],
             ])
         )
         await cb.answer("Payment failed", show_alert=True)
         return
     day_word = "s" if dur > 1 else ""
     await cb.message.edit_text(
-        f"\U0001f3c6 <b>{name} Premium</b>\n\n"
-        f"\U0001f4ac Unlimited texts & matches for <b>{dur} day{day_word}</b>\n\n"
-        f"\U0001f4b0 Total: <b>\xe2\x82\xb9{price}</b>\n\n"
-        "\U0001f4b3 Tap below to pay & activate instantly:",
+        f"🏆 <b>{name} Premium</b>\n\n"
+        f"💬 Unlimited texts & matches for <b>{dur} day{day_word}</b>\n\n"
+        f"💰 Total: <b>Rs {price}</b>\n\n"
+        "💳 Tap below to pay & activate instantly:",
         parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"\U0001f4b3 Pay \xe2\x82\xb9{price}", url=url)],
-            [InlineKeyboardButton(text="\u25c0\ufe0f Back to Plans", callback_data='premium_plans')],
+            [InlineKeyboardButton(text=f"💳 Pay Rs {price}", url=url)],
+            [InlineKeyboardButton(text="◀️ Back to Plans", callback_data='premium_plans')],
         ])
     )
     await cb.answer()@dp.callback_query(lambda cb: cb.data == 'back_to_premium')
@@ -2466,9 +2466,9 @@ async def back_prem(cb: types.CallbackQuery):
         await cb.message.edit_text("🌟 <b>Already Premium!</b>", parse_mode='HTML', reply_markup=main_kb(uid))
     else:
         await cb.message.edit_text(
-            f"\U0001f3c6 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
+            f"🏆 <b>Premium Plans</b>\n\n{quota_summary(uid)}\n\nChoose a plan:",
             parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌟 1 Day Trial — ₹49", callback_data='premium_1day')],
+                [InlineKeyboardButton(text="🌟 1 Day Trial &mdash; Rs 49", callback_data='premium_1day')],
                 [InlineKeyboardButton(text="\U0001f4cb See All Plans", callback_data='premium_plans')],
             ])
         )
@@ -2883,7 +2883,7 @@ async def edit_location_h(message: types.Message, state: FSMContext):
         text = (message.text or '').strip()
         if not text:
             return
-        # Keyboard button placeholder — silently ignore, user should type a real place
+        # Keyboard button placeholder &mdash; silently ignore, user should type a real place
         if text in ('\U0001f4cd Share My Location', '\u2328\ufe0f  Enter Place Name', '\U0001f4cd Share Location', 'Enter Place Name'):
             return
         lat, lon = await geocode(text)
@@ -2977,7 +2977,7 @@ async def check_queue_loop():
                         if (now - added).total_seconds() > QUEUE_TIMEOUT:
                             retries = waiting_queue[uid].get('retries', 0)
                             if retries < 3:
-                                # Retry — reset timer, increment counter, notify
+                                # Retry &mdash; reset timer, increment counter, notify
                                 waiting_queue[uid]['retries'] = retries + 1
                                 waiting_queue[uid]['added_at'] = now.isoformat()
                                 if uid in _queue_msg_ids:
@@ -2989,7 +2989,7 @@ async def check_queue_loop():
                                     except:
                                         pass
                             else:
-                                # 3 attempts exhausted — give up
+                                # 3 attempts exhausted &mdash; give up
                                 if uid in _queue_msg_ids:
                                     try:
                                         await bot.edit_message_text(
@@ -3119,7 +3119,7 @@ async def handle_razorpay_webhook(request):
         try:
             msg = f"\U0001f389 <b>Premium Activated!</b>\n\nYour Winkly premium is now active for {dur} day{'s' if dur > 1 else ''}.\n\n\u2705 Unlimited texts and matches!"
             if uid in current_chat:
-                msg += "\n\n\U0001f4ac Continue chatting with your match!"
+                msg += "\n\n💬 Continue chatting with your match!"
                 await bot.send_message(uid, msg, parse_mode='HTML')
             else:
                 await bot.send_message(
