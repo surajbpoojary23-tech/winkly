@@ -1645,17 +1645,35 @@ async def cmd_refer(message: types.Message):
             ])
         )
 
+async def get_chat_partners(uid: int) -> List[int]:
+    """Get partner user IDs for a given user from current_chat and active_matches."""
+    partner_uids = []
+    # From current_chat dict: bidirectional lookup
+    if uid in current_chat:
+        other = current_chat.get(uid)
+        if other and other in user_profiles:
+            partner_uids.append(other)
+    for mid, other in list(current_chat.items()):
+        if other == uid and mid in user_profiles:
+            partner_uids.append(mid)
+    # From active_matches
+    for matched_uid, match_data in list(active_matches.items()):
+        if isinstance(match_data, dict):
+            if matched_uid == uid:
+                for other in match_data.keys():
+                    if other in user_profiles:
+                        partner_uids.append(other)
+            elif any(k == uid for k in match_data.keys()):
+                if matched_uid in user_profiles:
+                    partner_uids.append(matched_uid)
+    return list(dict.fromkeys(partner_uids))  # dedupe
+
 @dp.message(Command('report'))
 async def cmd_report(message: types.Message):
     uid = message.from_user.id
-    open("/tmp/dbg.txt","a").write(f"REP uid={uid} text={repr(message.text[:50])}\n")
     await mark_online(uid)
-    r = await get_redis()
-    profile_key = f'winkly:fsm:{uid}:name'
-    exists = await r.exists(profile_key) if r else False
-    logger.info(f"cmd_report: uid={uid}, r={r}, exists={exists}")
-    if r is None or not exists:
-        await message.answer("📝 Set up your profile first, then send /report")
+    if uid not in user_profiles:
+        await message.answer("📝 Set up your profile first via /start.")
         return
     partners = await get_chat_partners(uid)
     if not partners:
@@ -1685,14 +1703,10 @@ async def cmd_test_report(message: types.Message):
 
 @dp.message(Command('feedback'))
 async def cmd_feedback(message: types.Message):
-    uid = message.from_user.id; open("/tmp/dbg.txt","a").write(str(uid)+"F ")
+    uid = message.from_user.id
     await mark_online(uid)
-    r = await get_redis()
-    profile_key = f'winkly:fsm:{uid}:name'
-    exists = await r.exists(profile_key) if r else False
-    logger.info(f"cmd_feedback: uid={uid}, r={r}, exists={exists}")
-    if r is None or not exists:
-        await message.answer("📝 Set up your profile first, then send /feedback")
+    if uid not in user_profiles:
+        await message.answer("📝 Set up your profile first via /start.")
         return
     await Feedback.message.set()
     await message.answer(
