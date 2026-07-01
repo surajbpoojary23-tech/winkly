@@ -2394,18 +2394,15 @@ async def prem_plans(cb: types.CallbackQuery):
     uid = cb.from_user.id
     await mark_online(uid)
     plan_rows = [
-        ("1 Day",    49,  1,  "🛡️"),
-        ("1 Week",   99,  7,  "✅ Best Value"),
-        ("2 Weeks",  149, 14, ""),
-        ("1 Month",  199, 30, "✅ Popular"),
+        ("1 Day",    49,  1,  "Limited time!"),
+        ("1 Week",   99,  7,  "50% off"),
+        ("2 Weeks",  149, 14, "50% off"),
+        ("1 Month",  199, 30, "50% off"),
     ]
     rows = []
     for name, price, days, badge in plan_rows:
-        per_day = round(price / days)
-        saving = max(0, int(round((1 - price / (49 * days)) * 100)))
         badge_txt = badge + " " if badge else ""
-        saving_txt = f" (Save {saving}%)" if saving > 0 else ""
-        row_text = f"{badge_txt}🏆 {name}  —  Rs {price}  -  Rs{per_day}/day{saving_txt}"
+        row_text = f"{badge_txt}{name}  --  Rs {price}"
         plan_id = ("trial_1d" if name == "1 Day" else
                    "weekly"   if name == "1 Week"  else
                    "biweekly" if name == "2 Weeks" else
@@ -2413,14 +2410,8 @@ async def prem_plans(cb: types.CallbackQuery):
         rows.append([InlineKeyboardButton(text=row_text, callback_data=f"premium_select:{plan_id}")])
     rows.append([InlineKeyboardButton(text="◀️ Back", callback_data='back_to_premium')])
     await cb.message.edit_text(
-        "🏆 <b>Unlimited Premium Plans</b>\n\n"
-        "👍 All plans include unlimited texts & matches\n\n"
-        "✅ 1 Day     —  Rs 49   -  Rs49/day\n"
-        "✅ 1 Week    —  Rs 99   -  Rs14/day (Save 71%)\n"
-        "✅ 2 Weeks  —  Rs 149  -  Rs11/day (Save 78%)\n"
-        "✅ 1 Month   —  Rs 199  -  Rs7/day  (Save 86%)\n\n"
-        "🛡️ <b>Save up to 86%</b> with longer plans!",
-        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+        "<b>Unlimited Premium Plans</b>\n\nAll plans include unlimited texts & matches\n\nSelect a plan:",
+                parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
     await cb.answer()
 
